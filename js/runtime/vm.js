@@ -6,274 +6,266 @@ import { Op } from "./opcodes.js";
 import { ExecutionBudget, BudgetExceededError } from "./budget.js";
 
 export class VM {
-  #bytecode;
-  #constants;
-  #ip = 0;
-  #stack = [];
-  #locals = [];
-  #stateSlots;
-  #callStack = [];
-  #actions = [];
-  #budget;
-  #robotId;
-  #sensorGateway;
-  #iterStack = [];
-  #program;
-
   constructor(program, robotId, sensorGateway) {
-    this.#program = program;
-    this.#bytecode = program.bytecode;
-    this.#constants = this.#rebuildConstants(program.bytecode);
-    this.#robotId = robotId;
-    this.#sensorGateway = sensorGateway;
-    this.#budget = new ExecutionBudget();
+    this.program = program;
+    this.bytecode = program.bytecode;
+    this.constants = this.rebuildConstants(program.bytecode);
+    this.robotId = robotId;
+    this.sensorGateway = sensorGateway;
+    this.budget = new ExecutionBudget();
+
+    this.ip = 0;
+    this.stack = [];
+    this.callStack = [];
+    this.actions = [];
+    this.iterStack = [];
 
     // Initialize state slots with default values
-    this.#stateSlots = program.stateSlots.map(s => s.initialValue);
-    this.#locals = new Array(256).fill(null);
+    this.stateSlots = program.stateSlots.map(s => s.initialValue);
+    this.locals = new Array(256).fill(null);
   }
 
   /** Execute an event handler */
   executeEvent(eventType, event) {
-    const offset = this.#program.eventHandlers.get(eventType);
+    const offset = this.program.eventHandlers.get(eventType);
     if (offset === undefined) {
       return { actions: [], budgetExceeded: false };
     }
 
-    this.#ip = offset;
-    this.#stack = [];
-    this.#actions = [];
-    this.#budget.reset();
-    this.#callStack = [];
-    this.#iterStack = [];
+    this.ip = offset;
+    this.stack = [];
+    this.actions = [];
+    this.budget.reset();
+    this.callStack = [];
+    this.iterStack = [];
 
     // Push event data onto the stack for handlers that declare a parameter
     // The compiled handler will pop it into a local slot via STORE_LOCAL
     if (event) {
-      this.#stack.push(this.#eventToVMObject(event));
+      this.stack.push(this.eventToVMObject(event));
     }
 
-    return this.#run();
+    return this.run();
   }
 
-  #run() {
+  run() {
     let budgetExceeded = false;
     let error;
 
     try {
-      while (this.#ip < this.#bytecode.length) {
-        this.#budget.tick();
-        const op = this.#bytecode[this.#ip++];
+      while (this.ip < this.bytecode.length) {
+        this.budget.tick();
+        const op = this.bytecode[this.ip++];
 
         switch (op) {
           case Op.CONST_NUM: {
-            const idx = this.#readU16();
-            const c = this.#constants[idx];
-            this.#push(c && c.type === "number" ? c.value : 0);
+            const idx = this.readU16();
+            const c = this.constants[idx];
+            this.push(c && c.type === "number" ? c.value : 0);
             break;
           }
 
           case Op.CONST_STR: {
-            const idx = this.#readU16();
-            const c = this.#constants[idx];
-            this.#push(c && c.type === "string" ? c.value : "");
+            const idx = this.readU16();
+            const c = this.constants[idx];
+            this.push(c && c.type === "string" ? c.value : "");
             break;
           }
 
           case Op.CONST_BOOL: {
-            const val = this.#readU16();
-            this.#push(val !== 0);
+            const val = this.readU16();
+            this.push(val !== 0);
             break;
           }
 
           case Op.CONST_NULL:
-            this.#push(null);
+            this.push(null);
             break;
 
           case Op.LOAD_LOCAL: {
-            const slot = this.#readU16();
-            this.#budget.memoryOp();
-            this.#push(this.#locals[slot]);
+            const slot = this.readU16();
+            this.budget.memoryOp();
+            this.push(this.locals[slot]);
             break;
           }
 
           case Op.STORE_LOCAL: {
-            const slot = this.#readU16();
-            this.#budget.memoryOp();
-            this.#locals[slot] = this.#pop();
+            const slot = this.readU16();
+            this.budget.memoryOp();
+            this.locals[slot] = this.pop();
             break;
           }
 
           case Op.LOAD_STATE: {
-            const idx = this.#readU16();
-            this.#budget.memoryOp();
-            this.#push(this.#stateSlots[idx]);
+            const idx = this.readU16();
+            this.budget.memoryOp();
+            this.push(this.stateSlots[idx]);
             break;
           }
 
           case Op.STORE_STATE: {
-            const idx = this.#readU16();
-            this.#budget.memoryOp();
-            this.#stateSlots[idx] = this.#pop();
+            const idx = this.readU16();
+            this.budget.memoryOp();
+            this.stateSlots[idx] = this.pop();
             break;
           }
 
           case Op.LOAD_CONST: {
-            const idx = this.#readU16();
-            const c = this.#constants[idx];
-            if (!c) { this.#push(null); break; }
-            if (c.type === "null") this.#push(null);
-            else this.#push(c.value);
+            const idx = this.readU16();
+            const c = this.constants[idx];
+            if (!c) { this.push(null); break; }
+            if (c.type === "null") this.push(null);
+            else this.push(c.value);
             break;
           }
 
           // Arithmetic
-          case Op.ADD: { const b = this.#popNum(); const a = this.#popNum(); this.#push(a + b); break; }
-          case Op.SUB: { const b = this.#popNum(); const a = this.#popNum(); this.#push(a - b); break; }
-          case Op.MUL: { const b = this.#popNum(); const a = this.#popNum(); this.#push(a * b); break; }
-          case Op.DIV: { const b = this.#popNum(); const a = this.#popNum(); this.#push(b !== 0 ? a / b : 0); break; }
-          case Op.MOD: { const b = this.#popNum(); const a = this.#popNum(); this.#push(b !== 0 ? a % b : 0); break; }
-          case Op.NEG: { this.#push(-this.#popNum()); break; }
+          case Op.ADD: { const b = this.popNum(); const a = this.popNum(); this.push(a + b); break; }
+          case Op.SUB: { const b = this.popNum(); const a = this.popNum(); this.push(a - b); break; }
+          case Op.MUL: { const b = this.popNum(); const a = this.popNum(); this.push(a * b); break; }
+          case Op.DIV: { const b = this.popNum(); const a = this.popNum(); this.push(b !== 0 ? a / b : 0); break; }
+          case Op.MOD: { const b = this.popNum(); const a = this.popNum(); this.push(b !== 0 ? a % b : 0); break; }
+          case Op.NEG: { this.push(-this.popNum()); break; }
 
           // Comparison
-          case Op.EQ:  { const b = this.#pop(); const a = this.#pop(); this.#push(a === b); break; }
-          case Op.NEQ: { const b = this.#pop(); const a = this.#pop(); this.#push(a !== b); break; }
-          case Op.LT:  { const b = this.#popNum(); const a = this.#popNum(); this.#push(a < b); break; }
-          case Op.LTE: { const b = this.#popNum(); const a = this.#popNum(); this.#push(a <= b); break; }
-          case Op.GT:  { const b = this.#popNum(); const a = this.#popNum(); this.#push(a > b); break; }
-          case Op.GTE: { const b = this.#popNum(); const a = this.#popNum(); this.#push(a >= b); break; }
+          case Op.EQ:  { const b = this.pop(); const a = this.pop(); this.push(a === b); break; }
+          case Op.NEQ: { const b = this.pop(); const a = this.pop(); this.push(a !== b); break; }
+          case Op.LT:  { const b = this.popNum(); const a = this.popNum(); this.push(a < b); break; }
+          case Op.LTE: { const b = this.popNum(); const a = this.popNum(); this.push(a <= b); break; }
+          case Op.GT:  { const b = this.popNum(); const a = this.popNum(); this.push(a > b); break; }
+          case Op.GTE: { const b = this.popNum(); const a = this.popNum(); this.push(a >= b); break; }
 
           // Logic
-          case Op.AND: { const b = this.#popBool(); const a = this.#popBool(); this.#push(a && b); break; }
-          case Op.OR:  { const b = this.#popBool(); const a = this.#popBool(); this.#push(a || b); break; }
-          case Op.NOT: { this.#push(!this.#popBool()); break; }
+          case Op.AND: { const b = this.popBool(); const a = this.popBool(); this.push(a && b); break; }
+          case Op.OR:  { const b = this.popBool(); const a = this.popBool(); this.push(a || b); break; }
+          case Op.NOT: { this.push(!this.popBool()); break; }
 
           // Jumps
           case Op.JMP: {
-            this.#ip = this.#readU16();
+            this.ip = this.readU16();
             break;
           }
           case Op.JMP_IF_FALSE: {
-            const target = this.#readU16();
-            if (!this.#isTruthy(this.#pop())) this.#ip = target;
+            const target = this.readU16();
+            if (!this.isTruthy(this.pop())) this.ip = target;
             break;
           }
           case Op.JMP_IF_TRUE: {
-            const target = this.#readU16();
-            if (this.#isTruthy(this.#pop())) this.#ip = target;
+            const target = this.readU16();
+            if (this.isTruthy(this.pop())) this.ip = target;
             break;
           }
 
           // Functions
           case Op.CALL: {
-            this.#budget.callFunction();
-            const target = this.#readU16();
-            this.#callStack.push({ returnAddress: this.#ip, baseSlot: 0 });
-            this.#ip = target;
+            this.budget.callFunction();
+            const target = this.readU16();
+            this.callStack.push({ returnAddress: this.ip, baseSlot: 0 });
+            this.ip = target;
             break;
           }
 
           case Op.CALL_BUILTIN: {
-            this.#budget.callSensor();
-            const nameIdx = this.#readU16();
-            const argCount = this.#bytecode[this.#ip++];
-            const nameConst = this.#constants[nameIdx];
+            this.budget.callSensor();
+            const nameIdx = this.readU16();
+            const argCount = this.bytecode[this.ip++];
+            const nameConst = this.constants[nameIdx];
             const name = nameConst && nameConst.type === "string" ? nameConst.value : "";
             const args = [];
             for (let i = 0; i < argCount; i++) {
-              args.unshift(this.#pop());
+              args.unshift(this.pop());
             }
-            const result = this.#sensorGateway(this.#robotId, name, args);
-            this.#push(result);
+            const result = this.sensorGateway(this.robotId, name, args);
+            this.push(result);
             break;
           }
 
           case Op.RETURN: {
-            if (this.#callStack.length > 0) {
-              const frame = this.#callStack.pop();
-              this.#ip = frame.returnAddress;
+            if (this.callStack.length > 0) {
+              const frame = this.callStack.pop();
+              this.ip = frame.returnAddress;
             } else {
-              return { actions: this.#actions, budgetExceeded: false };
+              return { actions: this.actions, budgetExceeded: false };
             }
             break;
           }
 
           case Op.RETURN_VAL: {
-            const val = this.#pop();
-            if (this.#callStack.length > 0) {
-              const frame = this.#callStack.pop();
-              this.#ip = frame.returnAddress;
+            const val = this.pop();
+            if (this.callStack.length > 0) {
+              const frame = this.callStack.pop();
+              this.ip = frame.returnAddress;
             }
-            this.#push(val);
-            if (this.#callStack.length === 0) {
-              return { actions: this.#actions, budgetExceeded: false };
+            this.push(val);
+            if (this.callStack.length === 0) {
+              return { actions: this.actions, budgetExceeded: false };
             }
             break;
           }
 
           // Actions
           case Op.ACTION: {
-            const argCount = this.#readU16();
+            const argCount = this.readU16();
             const args = [];
             for (let i = 0; i < argCount; i++) {
-              args.unshift(this.#pop());
+              args.unshift(this.pop());
             }
-            const actionName = this.#pop();
-            this.#actions.push(this.#buildActionIntent(actionName, args));
+            const actionName = this.pop();
+            this.actions.push(this.buildActionIntent(actionName, args));
             break;
           }
 
           // Member access
           case Op.GET_MEMBER: {
-            const propIdx = this.#readU16();
-            const propConst = this.#constants[propIdx];
+            const propIdx = this.readU16();
+            const propConst = this.constants[propIdx];
             const prop = propConst && propConst.type === "string" ? propConst.value : "";
-            const obj = this.#pop();
+            const obj = this.pop();
             if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-              this.#push(obj[prop] ?? null);
+              this.push(obj[prop] ?? null);
             } else {
-              this.#push(null);
+              this.push(null);
             }
             break;
           }
 
           // Iteration
           case Op.ITER_START: {
-            const list = this.#pop();
+            const list = this.pop();
             if (Array.isArray(list)) {
-              this.#iterStack.push({ items: list, index: 0 });
+              this.iterStack.push({ items: list, index: 0 });
             } else {
-              this.#iterStack.push({ items: [], index: 0 });
+              this.iterStack.push({ items: [], index: 0 });
             }
             break;
           }
 
           case Op.ITER_NEXT: {
-            const target = this.#readU16();
-            const iter = this.#iterStack[this.#iterStack.length - 1];
+            const target = this.readU16();
+            const iter = this.iterStack[this.iterStack.length - 1];
             if (!iter || iter.index >= iter.items.length) {
-              this.#ip = target;
+              this.ip = target;
             } else {
-              this.#push(iter.items[iter.index]);
+              this.push(iter.items[iter.index]);
               iter.index++;
             }
             break;
           }
 
           case Op.ITER_END: {
-            this.#iterStack.pop();
+            this.iterStack.pop();
             break;
           }
 
           // Stack
-          case Op.POP: this.#pop(); break;
-          case Op.DUP: { const v = this.#peek(); this.#push(v); break; }
+          case Op.POP: this.pop(); break;
+          case Op.DUP: { const v = this.peek(); this.push(v); break; }
 
           case Op.HALT:
-            return { actions: this.#actions, budgetExceeded: false };
+            return { actions: this.actions, budgetExceeded: false };
 
           default:
-            return { actions: this.#actions, budgetExceeded: false, error: `Unknown opcode: 0x${op.toString(16)}` };
+            return { actions: this.actions, budgetExceeded: false, error: `Unknown opcode: 0x${op.toString(16)}` };
         }
       }
     } catch (e) {
@@ -284,48 +276,48 @@ export class VM {
       }
     }
 
-    return { actions: this.#actions, budgetExceeded, error };
+    return { actions: this.actions, budgetExceeded, error };
   }
 
   // --- Stack helpers ---
 
-  #push(val) {
-    this.#stack.push(val);
+  push(val) {
+    this.stack.push(val);
   }
 
-  #pop() {
-    return this.#stack.pop() ?? null;
+  pop() {
+    return this.stack.pop() ?? null;
   }
 
-  #peek() {
-    return this.#stack.length > 0 ? this.#stack[this.#stack.length - 1] : null;
+  peek() {
+    return this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
   }
 
-  #popNum() {
-    const v = this.#pop();
+  popNum() {
+    const v = this.pop();
     return typeof v === "number" ? v : 0;
   }
 
-  #popBool() {
-    return this.#isTruthy(this.#pop());
+  popBool() {
+    return this.isTruthy(this.pop());
   }
 
-  #isTruthy(v) {
+  isTruthy(v) {
     if (v === null || v === false || v === 0) return false;
     return true;
   }
 
-  #readU16() {
-    const hi = this.#bytecode[this.#ip++] ?? 0;
-    const lo = this.#bytecode[this.#ip++] ?? 0;
+  readU16() {
+    const hi = this.bytecode[this.ip++] ?? 0;
+    const lo = this.bytecode[this.ip++] ?? 0;
     return (hi << 8) | lo;
   }
 
   // --- Helpers ---
 
-  #buildActionIntent(actionName, args) {
+  buildActionIntent(actionName, args) {
     const intent = {
-      robotId: this.#robotId,
+      robotId: this.robotId,
       type: actionName,
     };
 
@@ -351,7 +343,7 @@ export class VM {
     return intent;
   }
 
-  #eventToVMObject(event) {
+  eventToVMObject(event) {
     const obj = {
       type: event.type,
       tick: event.tick,
@@ -365,7 +357,7 @@ export class VM {
   }
 
   /** Rebuild constant pool from bytecode — for PoC we store it alongside the program */
-  #rebuildConstants(_bytecode) {
+  rebuildConstants(_bytecode) {
     // In the PoC the compiler returns the program with constants embedded.
     // We store them separately. This is a placeholder for a proper serialization format.
     return [];
@@ -373,11 +365,11 @@ export class VM {
 
   /** Set the constant pool directly (used by the match runner) */
   setConstants(constants) {
-    this.#constants = constants;
+    this.constants = constants;
   }
 
   /** Get current state for replay/inspection */
   getState() {
-    return [...this.#stateSlots];
+    return [...this.stateSlots];
   }
 }
