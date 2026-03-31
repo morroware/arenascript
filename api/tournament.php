@@ -3,9 +3,10 @@
 // Tournament System — Single Elimination, Round Robin, Swiss
 // ============================================================================
 
+require_once __DIR__ . '/config.php';
+
 /**
- * Simple seeded PRNG (matches the SeededRNG from the TS codebase).
- * Uses a linear congruential generator for deterministic sequences.
+ * Simple seeded PRNG (matching the JS SeededRNG behaviour).
  */
 class SeededRNG
 {
@@ -16,25 +17,26 @@ class SeededRNG
         $this->state = $seed;
     }
 
-    public function nextFloat(): float
+    /** Generate a pseudo-random float in [0, 1) */
+    public function next(): float
     {
-        // Mulberry32-style
-        $this->state = ($this->state + 0x6D2B79F5) & 0x7FFFFFFF;
-        $t = ($this->state ^ ($this->state >> 15)) * ($this->state | 1);
-        $t = ($t + (($t ^ ($t >> 7)) * ($t | 61))) & 0x7FFFFFFF;
-        return (($t ^ ($t >> 14)) & 0x7FFFFFFF) / 0x7FFFFFFF;
+        // Simple LCG
+        $this->state = ($this->state * 1664525 + 1013904223) & 0x7FFFFFFF;
+        return $this->state / 0x80000000;
     }
 
+    /** Generate a pseudo-random integer in [$min, $max] */
     public function nextInt(int $min, int $max): int
     {
-        return $min + (int) floor($this->nextFloat() * ($max - $min + 1));
+        return $min + (int) floor($this->next() * ($max - $min + 1));
     }
 }
 
 class TournamentManager
 {
     /**
-     * @var array<string, array{tournament: array, entries: array, rng: SeededRNG, currentRound: int}>
+     * @var array<string, array> tournamentId => TournamentState
+     *   TournamentState: {tournament, entries, rng, currentRound}
      */
     private array $tournaments = [];
 
@@ -43,29 +45,28 @@ class TournamentManager
      *
      * @param string $name
      * @param string $format  'single_elimination' | 'round_robin' | 'swiss'
-     * @param array  $entries Array of ['playerId'=>string,'program'=>array,'constants'=>array,'elo'=>int]
+     * @param array  $entries TournamentEntry[]
      * @param int    $seed
-     * @return array  The tournament data structure
+     * @return array          Tournament data
      */
     public function createTournament(
         string $name,
         string $format,
-        array $entries,
-        int $seed = 0
+        array  $entries,
+        int    $seed = 0,
     ): array {
         if ($seed === 0) {
             $seed = (int) (microtime(true) * 1000);
         }
 
-        $id = "tournament_{$seed}";
+        $id  = 'tournament_' . $seed;
         $rng = new SeededRNG($seed);
 
         // Seed participants by Elo (highest first)
-        $sorted = $entries;
-        usort($sorted, fn(array $a, array $b) => $b['elo'] <=> $a['elo']);
+        usort($entries, fn(array $a, array $b) => $b['elo'] <=> $a['elo']);
 
         $participants = [];
-        foreach ($sorted as $i => $e) {
+        foreach ($entries as $i => $e) {
             $participants[] = [
                 'playerId'   => $e['playerId'],
                 'programId'  => $e['program']['programId'] ?? '',
@@ -88,7 +89,7 @@ class TournamentManager
 
         $this->tournaments[$id] = [
             'tournament'   => $tournament,
-            'entries'      => $sorted,
+            'entries'      => $entries,
             'rng'          => $rng,
             'currentRound' => 0,
         ];
@@ -99,75 +100,71 @@ class TournamentManager
         return $this->tournaments[$id]['tournament'];
     }
 
-    /** Generate pairings for the next round */
+    // -------------------------------------------------------------------------
+    // Round generation
+    // -------------------------------------------------------------------------
+
     private function generateNextRound(string $tournamentId): ?array
     {
         if (!isset($this->tournaments[$tournamentId])) {
             return null;
         }
 
-        $state = &$this->tournaments[$tournamentId];
-        $tournament = &$state['tournament'];
-        $rng = $state['rng'];
+        $tournament = &$this->tournaments[$tournamentId]['tournament'];
+        $rng        = $this->tournaments[$tournamentId]['rng'];
 
         $active = array_values(array_filter(
             $tournament['participants'],
-            fn(array $p) => !$p['eliminated']
+            fn(array $p) => !$p['eliminated'],
         ));
 
         if (count($active) < 2) {
             return null;
         }
 
-        $matches = [];
+        $matches = match ($tournament['format']) {
+            'single_elimination' => $this->generateSingleEliminationPairings($active, $rng),
+            'round_robin'        => $this->generateRoundRobinPairings($tournament, $this->tournaments[$tournamentId]['currentRound']),
+            'swiss'              => $this->generateSwissPairings($active, $rng),
+            default              => null,
+        };
 
-        switch ($tournament['format']) {
-            case 'single_elimination':
-                $matches = $this->generateSingleEliminationPairings($active, $rng);
-                break;
-            case 'round_robin':
-                $matches = $this->generateRoundRobinPairings($tournament, $state['currentRound']);
-                break;
-            case 'swiss':
-                $matches = $this->generateSwissPairings($active, $rng);
-                break;
-            default:
-                return null;
+        if ($matches === null) {
+            return null;
         }
 
         $round = [
-            'roundNumber' => $state['currentRound'] + 1,
+            'roundNumber' => $this->tournaments[$tournamentId]['currentRound'] + 1,
             'matches'     => $matches,
             'completed'   => false,
         ];
 
         $tournament['rounds'][] = $round;
-        $state['currentRound']++;
+        $this->tournaments[$tournamentId]['currentRound']++;
 
         return $round;
     }
 
-    /**
-     * Run all matches in the current round.
-     *
-     * @param callable $runMatchFn  fn(array $setup): array returning ['winner'=>int|null, 'replay'=>[...]]
-     */
-    public function runCurrentRound(string $tournamentId, callable $runMatchFn): ?array
+    // -------------------------------------------------------------------------
+    // Run current round
+    // -------------------------------------------------------------------------
+
+    public function runCurrentRound(string $tournamentId): ?array
     {
         if (!isset($this->tournaments[$tournamentId])) {
             return null;
         }
 
-        $state = &$this->tournaments[$tournamentId];
-        $tournament = &$state['tournament'];
-        $entries = $state['entries'];
-        $rng = $state['rng'];
+        $tournament = &$this->tournaments[$tournamentId]['tournament'];
+        $entries    = $this->tournaments[$tournamentId]['entries'];
+        $rng        = $this->tournaments[$tournamentId]['rng'];
 
-        if (empty($tournament['rounds'])) {
+        $roundIndex = count($tournament['rounds']) - 1;
+        if ($roundIndex < 0) {
             return null;
         }
 
-        $currentRound = &$tournament['rounds'][count($tournament['rounds']) - 1];
+        $currentRound = &$tournament['rounds'][$roundIndex];
         if ($currentRound['completed']) {
             return null;
         }
@@ -179,8 +176,7 @@ class TournamentManager
 
             $entry1 = $entries[$match['participant1Index']] ?? null;
             $entry2 = $entries[$match['participant2Index']] ?? null;
-
-            if ($entry1 === null || $entry2 === null) {
+            if (!$entry1 || !$entry2) {
                 continue;
             }
 
@@ -195,22 +191,22 @@ class TournamentManager
                 ],
                 'participants' => [
                     [
-                        'program'    => $entry1['program'],
-                        'constants'  => $entry1['constants'],
-                        'playerId'   => $entry1['playerId'],
-                        'teamId'     => 0,
+                        'program'   => $entry1['program'],
+                        'constants' => $entry1['constants'],
+                        'playerId'  => $entry1['playerId'],
+                        'teamId'    => 0,
                     ],
                     [
-                        'program'    => $entry2['program'],
-                        'constants'  => $entry2['constants'],
-                        'playerId'   => $entry2['playerId'],
-                        'teamId'     => 1,
+                        'program'   => $entry2['program'],
+                        'constants' => $entry2['constants'],
+                        'playerId'  => $entry2['playerId'],
+                        'teamId'    => 1,
                     ],
                 ],
             ];
 
-            $result = $runMatchFn($setup);
-            $match['matchId'] = 'tmatch_' . $rng->nextInt(0, 999999);
+            $result = $this->runMatchEngine($setup);
+            $match['matchId']   = 'tmatch_' . $rng->nextInt(0, 999999);
             $match['completed'] = true;
 
             if ($result['winner'] === 0) {
@@ -228,7 +224,7 @@ class TournamentManager
                     $tournament['participants'][$match['participant1Index']]['eliminated'] = true;
                 }
             } else {
-                // Draw -- in single elimination, give it to higher seed
+                // Draw — in single elimination, give it to higher seed
                 $match['winner'] = $match['participant1Index'];
                 if ($tournament['format'] === 'single_elimination') {
                     $tournament['participants'][$match['participant2Index']]['eliminated'] = true;
@@ -240,10 +236,10 @@ class TournamentManager
         $currentRound['completed'] = true;
 
         // Check if tournament is over
-        $active = array_filter(
+        $active = array_values(array_filter(
             $tournament['participants'],
-            fn(array $p) => !$p['eliminated']
-        );
+            fn(array $p) => !$p['eliminated'],
+        ));
 
         if ($tournament['format'] === 'single_elimination' && count($active) <= 1) {
             $tournament['status'] = 'completed';
@@ -271,7 +267,11 @@ class TournamentManager
         return $currentRound;
     }
 
-    /** Get tournament standings */
+    // -------------------------------------------------------------------------
+    // Standings
+    // -------------------------------------------------------------------------
+
+    /** @return array[] */
     public function getStandings(string $tournamentId): array
     {
         if (!isset($this->tournaments[$tournamentId])) {
@@ -282,7 +282,9 @@ class TournamentManager
         usort($participants, function (array $a, array $b) {
             if ($a['eliminated'] && !$b['eliminated']) return 1;
             if (!$a['eliminated'] && $b['eliminated']) return -1;
-            return ($b['wins'] <=> $a['wins']) ?: ($a['losses'] <=> $b['losses']) ?: ($a['seed'] <=> $b['seed']);
+            return ($b['wins'] <=> $a['wins'])
+                ?: ($a['losses'] <=> $b['losses'])
+                ?: ($a['seed'] <=> $b['seed']);
         });
 
         return $participants;
@@ -293,52 +295,48 @@ class TournamentManager
         return $this->tournaments[$id]['tournament'] ?? null;
     }
 
-    // --- Pairing Generators ---
+    // -------------------------------------------------------------------------
+    // Pairing generators
+    // -------------------------------------------------------------------------
 
     private function generateSingleEliminationPairings(array $active, SeededRNG $rng): array
     {
         $matches = [];
         // Pair by seed: 1v(n), 2v(n-1), etc.
-        $sorted = $active;
-        usort($sorted, fn(array $a, array $b) => $a['seed'] <=> $b['seed']);
-
-        $half = (int) floor(count($sorted) / 2);
-        for ($i = 0; $i < $half; $i++) {
-            $p1 = $sorted[$i];
-            $p2 = $sorted[count($sorted) - 1 - $i];
+        usort($active, fn(array $a, array $b) => $a['seed'] <=> $b['seed']);
+        $count = count($active);
+        for ($i = 0; $i < intdiv($count, 2); $i++) {
+            $p1 = $active[$i];
+            $p2 = $active[$count - 1 - $i];
             $matches[] = [
-                'matchId'            => '',
-                'participant1Index'  => $p1['seed'] - 1,
-                'participant2Index'  => $p2['seed'] - 1,
-                'completed'          => false,
+                'matchId'           => '',
+                'participant1Index' => $p1['seed'] - 1,
+                'participant2Index' => $p2['seed'] - 1,
+                'completed'         => false,
             ];
         }
-        // Bye for odd participant (auto-advance highest remaining)
         return $matches;
     }
 
     private function generateRoundRobinPairings(array $tournament, int $roundIndex): array
     {
-        $n = count($tournament['participants']);
+        $n       = count($tournament['participants']);
         $matches = [];
 
-        // Circle method for round-robin scheduling
-        // Fix player 0, rotate others
+        // Circle method for round-robin scheduling: fix player 0, rotate others
         $indices = range(0, $n - 1);
 
         for ($r = 0; $r < $roundIndex; $r++) {
-            // Rotate all except first
             $last = array_pop($indices);
             array_splice($indices, 1, 0, [$last]);
         }
 
-        $half = (int) floor($n / 2);
-        for ($i = 0; $i < $half; $i++) {
+        for ($i = 0; $i < intdiv($n, 2); $i++) {
             $matches[] = [
-                'matchId'            => '',
-                'participant1Index'  => $indices[$i],
-                'participant2Index'  => $indices[$n - 1 - $i],
-                'completed'          => false,
+                'matchId'           => '',
+                'participant1Index' => $indices[$i],
+                'participant2Index' => $indices[$n - 1 - $i],
+                'completed'         => false,
             ];
         }
 
@@ -348,27 +346,29 @@ class TournamentManager
     private function generateSwissPairings(array $active, SeededRNG $rng): array
     {
         // Sort by wins (desc), then by seed
-        $sorted = $active;
-        usort($sorted, fn(array $a, array $b) => ($b['wins'] <=> $a['wins']) ?: ($a['seed'] <=> $b['seed']));
+        usort($active, fn(array $a, array $b) =>
+            ($b['wins'] <=> $a['wins']) ?: ($a['seed'] <=> $b['seed'])
+        );
 
         $matches = [];
-        $paired = [];
+        $paired  = [];
 
-        for ($i = 0; $i < count($sorted); $i++) {
-            $idx1 = $sorted[$i]['seed'] - 1;
+        $count = count($active);
+        for ($i = 0; $i < $count; $i++) {
+            $idx1 = $active[$i]['seed'] - 1;
             if (isset($paired[$idx1])) {
                 continue;
             }
-            for ($j = $i + 1; $j < count($sorted); $j++) {
-                $idx2 = $sorted[$j]['seed'] - 1;
+            for ($j = $i + 1; $j < $count; $j++) {
+                $idx2 = $active[$j]['seed'] - 1;
                 if (isset($paired[$idx2])) {
                     continue;
                 }
                 $matches[] = [
-                    'matchId'            => '',
-                    'participant1Index'  => $idx1,
-                    'participant2Index'  => $idx2,
-                    'completed'          => false,
+                    'matchId'           => '',
+                    'participant1Index' => $idx1,
+                    'participant2Index' => $idx2,
+                    'completed'         => false,
                 ];
                 $paired[$idx1] = true;
                 $paired[$idx2] = true;
@@ -377,5 +377,29 @@ class TournamentManager
         }
 
         return $matches;
+    }
+
+    // -------------------------------------------------------------------------
+    // Engine hook — replace with actual match engine implementation
+    // -------------------------------------------------------------------------
+
+    /**
+     * Stub for the match engine. Replace with real implementation.
+     *
+     * @param array $setup
+     * @return array {winner: int|null, replay: array}
+     */
+    protected function runMatchEngine(array $setup): array
+    {
+        $matchId = 'match_' . bin2hex(random_bytes(8));
+        return [
+            'winner' => null,
+            'replay' => [
+                'metadata' => [
+                    'matchId'      => $matchId,
+                    'participants' => $setup['participants'],
+                ],
+            ],
+        ];
     }
 }

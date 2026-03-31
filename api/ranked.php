@@ -17,27 +17,35 @@ function getKFactor(float $rating): int
     return $rating > 2400 ? ELO_K_FACTOR_HIGH : ELO_K_FACTOR;
 }
 
-/** Calculate new Elo ratings after a match */
+/**
+ * Calculate new Elo ratings after a match.
+ *
+ * @return array{winnerNew: int, loserNew: int, winnerDelta: int, loserDelta: int}
+ */
 function calculateEloChange(float $winnerRating, float $loserRating): array
 {
-    $expectedWin = expectedScore($winnerRating, $loserRating);
+    $expectedWin  = expectedScore($winnerRating, $loserRating);
     $expectedLose = expectedScore($loserRating, $winnerRating);
 
     $kWinner = getKFactor($winnerRating);
-    $kLoser = getKFactor($loserRating);
+    $kLoser  = getKFactor($loserRating);
 
     $winnerDelta = (int) round($kWinner * (1 - $expectedWin));
-    $loserDelta = (int) round($kLoser * (0 - $expectedLose));
+    $loserDelta  = (int) round($kLoser * (0 - $expectedLose));
 
     return [
-        'winnerNew'   => $winnerRating + $winnerDelta,
-        'loserNew'    => max(0, $loserRating + $loserDelta),
+        'winnerNew'   => (int) ($winnerRating + $winnerDelta),
+        'loserNew'    => (int) max(0, $loserRating + $loserDelta),
         'winnerDelta' => $winnerDelta,
         'loserDelta'  => $loserDelta,
     ];
 }
 
-/** Calculate Elo change for a draw */
+/**
+ * Calculate Elo change for a draw.
+ *
+ * @return array{newA: int, newB: int, deltaA: int, deltaB: int}
+ */
 function calculateEloDraw(float $ratingA, float $ratingB): array
 {
     $expectedA = expectedScore($ratingA, $ratingB);
@@ -50,8 +58,8 @@ function calculateEloDraw(float $ratingA, float $ratingB): array
     $deltaB = (int) round($kB * (0.5 - $expectedB));
 
     return [
-        'newA'   => max(0, $ratingA + $deltaA),
-        'newB'   => max(0, $ratingB + $deltaB),
+        'newA'   => (int) max(0, $ratingA + $deltaA),
+        'newB'   => (int) max(0, $ratingB + $deltaB),
         'deltaA' => $deltaA,
         'deltaB' => $deltaB,
     ];
@@ -68,10 +76,12 @@ function getRankTier(int $elo): string
     return 'bronze';
 }
 
-/** In-memory player rating store (for PoC -- production would use a database) */
+/**
+ * In-memory player rating store (for PoC — production would use a database).
+ */
 class RatingStore
 {
-    /** @var array<string, array> */
+    /** @var array<string, array> playerId => PlayerRating */
     private array $ratings = [];
 
     public function getOrCreate(string $playerId): array
@@ -90,31 +100,32 @@ class RatingStore
         return $this->ratings[$playerId];
     }
 
-    /** Update ratings after a match with a winner */
+    /**
+     * Update ratings after a match with a winner.
+     *
+     * @return array{winnerRating: array, loserRating: array}
+     */
     public function recordResult(string $winnerId, string $loserId, string $matchId): array
     {
         $winner = $this->getOrCreate($winnerId);
-        $loser = $this->getOrCreate($loserId);
+        $loser  = $this->getOrCreate($loserId);
 
-        $change = calculateEloChange($winner['elo'], $loser['elo']);
+        $result = calculateEloChange($winner['elo'], $loser['elo']);
 
-        $winner['elo'] = $change['winnerNew'];
-        $winner['tier'] = getRankTier((int) $change['winnerNew']);
+        $winner['elo']  = $result['winnerNew'];
+        $winner['tier'] = getRankTier($result['winnerNew']);
         $winner['wins']++;
         $winner['matchHistory'][] = $matchId;
 
-        $loser['elo'] = $change['loserNew'];
-        $loser['tier'] = getRankTier((int) $change['loserNew']);
+        $loser['elo']  = $result['loserNew'];
+        $loser['tier'] = getRankTier($result['loserNew']);
         $loser['losses']++;
         $loser['matchHistory'][] = $matchId;
 
         $this->ratings[$winnerId] = $winner;
-        $this->ratings[$loserId] = $loser;
+        $this->ratings[$loserId]  = $loser;
 
-        return [
-            'winnerRating' => $winner,
-            'loserRating'  => $loser,
-        ];
+        return ['winnerRating' => $winner, 'loserRating' => $loser];
     }
 
     /** Update ratings after a draw */
@@ -123,15 +134,15 @@ class RatingStore
         $a = $this->getOrCreate($playerAId);
         $b = $this->getOrCreate($playerBId);
 
-        $change = calculateEloDraw($a['elo'], $b['elo']);
+        $result = calculateEloDraw($a['elo'], $b['elo']);
 
-        $a['elo'] = $change['newA'];
-        $a['tier'] = getRankTier((int) $change['newA']);
+        $a['elo']  = $result['newA'];
+        $a['tier'] = getRankTier($result['newA']);
         $a['draws']++;
         $a['matchHistory'][] = $matchId;
 
-        $b['elo'] = $change['newB'];
-        $b['tier'] = getRankTier((int) $change['newB']);
+        $b['elo']  = $result['newB'];
+        $b['tier'] = getRankTier($result['newB']);
         $b['draws']++;
         $b['matchHistory'][] = $matchId;
 
@@ -139,7 +150,11 @@ class RatingStore
         $this->ratings[$playerBId] = $b;
     }
 
-    /** Get leaderboard sorted by Elo descending */
+    /**
+     * Get leaderboard sorted by Elo descending.
+     *
+     * @return array[]
+     */
     public function getLeaderboard(int $limit = 100): array
     {
         $all = array_values($this->ratings);
