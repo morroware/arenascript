@@ -1,0 +1,611 @@
+/* ============================================================================
+   ArenaScript — Dark Theme Stylesheet
+   ============================================================================ */
+
+/* --- Reset & Base --- */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg-primary: #0d0d1a;
+  --bg-secondary: #1a1a2e;
+  --bg-tertiary: #16213e;
+  --bg-panel: #0f1129;
+  --border: #2a2a4a;
+  --border-active: #3a3a6a;
+  --text-primary: #e0e0e8;
+  --text-secondary: #8888aa;
+  --text-muted: #555577;
+  --accent-cyan: #00d4ff;
+  --accent-green: #00ff88;
+  --accent-orange: #ff8800;
+  --accent-red: #ff3355;
+  --accent-purple: #aa55ff;
+  --accent-yellow: #ffdd00;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --font-ui: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --radius: 6px;
+  --radius-lg: 10px;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* --- Layout --- */
+.app {
+  display: grid;
+  grid-template-columns: 220px 1fr 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    "header  header  header"
+    "sidebar editor  arena"
+    "sidebar console console";
+  height: 100vh;
+  gap: 1px;
+  background: var(--border);
+}
+
+/* --- Header --- */
+.header {
+  grid-area: header;
+  background: var(--bg-secondary);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.header__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header__logo {
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-green));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header__version {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.header__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* --- Buttons --- */
+.btn {
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 8px 18px;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn--compile {
+  background: linear-gradient(135deg, #1a6b3c, #228b22);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 255, 136, 0.15);
+}
+
+.btn--run {
+  background: linear-gradient(135deg, #b35200, #e06600);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(255, 136, 0, 0.15);
+}
+
+.btn--stop {
+  background: linear-gradient(135deg, #8b0000, #cc2244);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(255, 51, 85, 0.15);
+}
+
+.btn--secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn--secondary:hover {
+  border-color: var(--accent-cyan);
+  color: var(--text-primary);
+}
+
+/* --- Sidebar --- */
+.sidebar {
+  grid-area: sidebar;
+  background: var(--bg-secondary);
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+.sidebar__title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 14px 14px 8px;
+}
+
+.sidebar__list {
+  list-style: none;
+  padding: 0 6px;
+}
+
+.sidebar__item {
+  padding: 10px 12px;
+  margin-bottom: 2px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.sidebar__item:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-active);
+}
+
+.sidebar__item--active {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-cyan);
+}
+
+.sidebar__bot-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 2px;
+}
+
+.sidebar__bot-class {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sidebar__bot-desc {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+.class-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.class-badge--brawler { background: rgba(255, 51, 85, 0.15); color: var(--accent-red); }
+.class-badge--ranger  { background: rgba(0, 212, 255, 0.15); color: var(--accent-cyan); }
+.class-badge--tank    { background: rgba(170, 85, 255, 0.15); color: var(--accent-purple); }
+.class-badge--support { background: rgba(0, 255, 136, 0.15); color: var(--accent-green); }
+
+/* --- Editor Panel --- */
+.editor-panel {
+  grid-area: editor;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.editor-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.editor-panel__title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.editor-panel__info {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.editor-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.editor {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 14px 16px;
+  tab-size: 2;
+  -moz-tab-size: 2;
+  white-space: pre;
+  overflow: auto;
+}
+
+.editor::placeholder {
+  color: var(--text-muted);
+}
+
+.editor:focus {
+  box-shadow: inset 0 0 0 1px var(--accent-cyan);
+}
+
+/* --- Arena Panel --- */
+.arena-panel {
+  grid-area: arena;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.arena-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.arena-panel__title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.arena-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  background: var(--bg-panel);
+  position: relative;
+}
+
+#arena-canvas {
+  border: 1px solid var(--border-active);
+  border-radius: var(--radius);
+  background: #0a0a18;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* --- Match Results Overlay --- */
+.match-results {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(13, 13, 26, 0.92);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-lg);
+  padding: 24px 32px;
+  text-align: center;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  min-width: 280px;
+  display: none;
+}
+
+.match-results--visible {
+  display: block;
+}
+
+.match-results__title {
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.match-results__title--win {
+  color: var(--accent-green);
+}
+
+.match-results__title--draw {
+  color: var(--accent-yellow);
+}
+
+.match-results__detail {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+}
+
+.match-results__stats {
+  margin-top: 12px;
+  font-size: 0.75rem;
+  text-align: left;
+}
+
+.match-results__stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.match-results__stat-label {
+  color: var(--text-muted);
+}
+
+.match-results__stat-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.match-results__close {
+  margin-top: 14px;
+}
+
+/* --- Console Panel --- */
+.console-panel {
+  grid-area: console;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  max-height: 240px;
+  overflow: hidden;
+}
+
+.console-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.console-panel__title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.console-panel__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.console-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+}
+
+.console-output::-webkit-scrollbar {
+  width: 6px;
+}
+
+.console-output::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.console-output::-webkit-scrollbar-thumb {
+  background: var(--border-active);
+  border-radius: 3px;
+}
+
+.log-line {
+  padding: 1px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-line--info    { color: var(--text-secondary); }
+.log-line--success { color: var(--accent-green); }
+.log-line--error   { color: var(--accent-red); }
+.log-line--warn    { color: var(--accent-orange); }
+.log-line--event   { color: var(--accent-cyan); }
+.log-line--stat    { color: var(--accent-purple); }
+.log-line--header  {
+  color: var(--accent-yellow);
+  font-weight: 700;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+/* --- Playback Controls --- */
+.playback-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playback-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 120px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+}
+
+.playback-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--accent-cyan);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.playback-info {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  min-width: 80px;
+}
+
+/* --- Status Indicator --- */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+}
+
+.status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.status__dot--ready    { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.status__dot--running  { background: var(--accent-orange); box-shadow: 0 0 6px var(--accent-orange); animation: pulse 1s ease infinite; }
+.status__dot--error    { background: var(--accent-red); box-shadow: 0 0 6px var(--accent-red); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+.status__text {
+  color: var(--text-muted);
+}
+
+/* --- Opponent Selector --- */
+.opponent-select {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  cursor: pointer;
+}
+
+.opponent-select:focus {
+  border-color: var(--accent-cyan);
+}
+
+/* --- Responsive --- */
+@media (max-width: 1100px) {
+  .app {
+    grid-template-columns: 180px 1fr;
+    grid-template-rows: auto 1fr 1fr auto;
+    grid-template-areas:
+      "header  header"
+      "sidebar editor"
+      "sidebar arena"
+      "console console";
+  }
+}
+
+@media (max-width: 768px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 300px 300px auto;
+    grid-template-areas:
+      "header"
+      "sidebar"
+      "editor"
+      "arena"
+      "console";
+  }
+
+  .sidebar {
+    max-height: 120px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .sidebar__list {
+    display: flex;
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .sidebar__item {
+    min-width: 140px;
+    flex-shrink: 0;
+  }
+}
