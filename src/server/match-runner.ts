@@ -31,6 +31,9 @@ export class MatchRunner {
 
   /** Execute a server-authoritative match */
   runRankedMatch(request: MatchRequest): MatchResponse {
+    const player1EloAtStart = this.ratingStore.getOrCreate(request.player1.playerId).elo;
+    const player2EloAtStart = this.ratingStore.getOrCreate(request.player2.playerId).elo;
+
     const setup: MatchSetup = {
       config: request.config,
       participants: [
@@ -69,9 +72,7 @@ export class MatchRunner {
       config: request.config,
       participants: result.replay.metadata.participants.map((p, i) => ({
         ...p,
-        eloAtStart: i === 0
-          ? this.ratingStore.getOrCreate(request.player1.playerId).elo
-          : this.ratingStore.getOrCreate(request.player2.playerId).elo,
+        eloAtStart: i === 0 ? player1EloAtStart : player2EloAtStart,
       })),
       status: "completed",
       winner: result.winner,
