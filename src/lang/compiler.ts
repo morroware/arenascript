@@ -150,22 +150,23 @@ export class Compiler {
       }
     }
 
-    // Compile event handlers
-    const eventHandlers = new Map<GameEventType, number>();
-    for (const handler of program.handlers) {
-      const offset = builder.code.length;
-      eventHandlers.set(handler.event as GameEventType, offset);
-      this.compileEventHandler(handler, builder);
-      builder.emit(Op.RETURN);
-    }
-
-    // Compile functions
+    // Two-pass function compilation for forward references:
+    // Pass 1: Compile all functions first so their offsets are known
     const functions = new Map<string, number>();
     for (const fn of program.functions) {
       const offset = builder.code.length;
       functions.set(fn.name, offset);
       this.functionOffsets.set(fn.name, offset);
       this.compileFunction(fn, builder);
+    }
+
+    // Pass 2: Compile event handlers (can now reference any function)
+    const eventHandlers = new Map<GameEventType, number>();
+    for (const handler of program.handlers) {
+      const offset = builder.code.length;
+      eventHandlers.set(handler.event as GameEventType, offset);
+      this.compileEventHandler(handler, builder);
+      builder.emit(Op.RETURN);
     }
 
     builder.emit(Op.HALT);
@@ -198,8 +199,9 @@ export class Compiler {
   private compileEventHandler(handler: EventHandlerNode, b: ChunkBuilder): void {
     b.beginScope();
     if (handler.param) {
-      b.declareLocal(handler.param);
-      // Event parameter is pushed by the VM before calling the handler
+      const slot = b.declareLocal(handler.param);
+      // Pop the event parameter (pushed by the VM) into the local slot
+      b.emitWithOperand(Op.STORE_LOCAL, slot);
     }
     this.compileStatements(handler.body, b);
     b.endScope();
@@ -207,8 +209,14 @@ export class Compiler {
 
   private compileFunction(fn: FunctionDeclNode, b: ChunkBuilder): void {
     b.beginScope();
+    // Declare local slots for parameters
+    const paramSlots: number[] = [];
     for (const param of fn.params) {
-      b.declareLocal(param.name);
+      paramSlots.push(b.declareLocal(param.name));
+    }
+    // Pop caller-pushed arguments into parameter slots (reverse order since stack is LIFO)
+    for (let i = paramSlots.length - 1; i >= 0; i--) {
+      b.emitWithOperand(Op.STORE_LOCAL, paramSlots[i]);
     }
     this.compileStatements(fn.body, b);
     b.emit(Op.RETURN);
@@ -248,7 +256,9 @@ export class Compiler {
         b.endScope();
 
         if (stmt.elseIfBranches.length > 0 || stmt.elseBranch) {
-          const jumpToEnd = b.emitJump(Op.JMP);
+          // Collect all jumps-to-end so we can patch them after the full chain
+          const endJumps: number[] = [];
+          endJumps.push(b.emitJump(Op.JMP));
           b.patchJump(jumpToElse);
 
           for (let i = 0; i < stmt.elseIfBranches.length; i++) {
@@ -258,11 +268,8 @@ export class Compiler {
             b.beginScope();
             this.compileStatements(branch.body, b);
             b.endScope();
-            // Jump to end after this branch
-            const jEnd = b.emitJump(Op.JMP);
+            endJumps.push(b.emitJump(Op.JMP));
             b.patchJump(jumpNext);
-            // Patch previous jumpToEnd chain — simplified: just use jEnd
-            b.patchJump(jEnd); // will be re-patched below
           }
 
           if (stmt.elseBranch) {
@@ -270,7 +277,11 @@ export class Compiler {
             this.compileStatements(stmt.elseBranch, b);
             b.endScope();
           }
-          b.patchJump(jumpToEnd);
+
+          // Patch all end-jumps to point here (after the entire if/else chain)
+          for (const jump of endJumps) {
+            b.patchJump(jump);
+          }
         } else {
           b.patchJump(jumpToElse);
         }

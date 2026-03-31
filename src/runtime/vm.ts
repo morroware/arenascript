@@ -71,9 +71,10 @@ export class VM {
     this.callStack = [];
     this.iterStack = [];
 
-    // Push event data if handler expects a parameter
+    // Push event data onto the stack for handlers that declare a parameter
+    // The compiled handler will pop it into a local slot via STORE_LOCAL
     if (event) {
-      this.locals[0] = this.eventToVMObject(event);
+      this.stack.push(this.eventToVMObject(event));
     }
 
     return this.run();

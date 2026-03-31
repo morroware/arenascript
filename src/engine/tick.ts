@@ -128,14 +128,6 @@ export function runMatch(setup: MatchSetup): MatchResult {
         stats.budgetExceeded++;
       }
 
-      // Process pending events for this robot
-      const robotEvents = world.pendingEvents.filter(e => e.robotId === robotId);
-      for (const event of robotEvents) {
-        if (event.type !== "tick" && event.type !== "spawn") {
-          vm.executeEvent(event.type, event);
-        }
-      }
-
       // Validate and categorize actions
       if (result.actions.length > 0) {
         const { movement, combat, utility } = categorizeActions(result.actions);
@@ -207,7 +199,7 @@ export function runMatch(setup: MatchSetup): MatchResult {
     checkCooldownReady(world);
     const tickEvents = world.drainEvents();
 
-    // Track damage stats
+    // Track damage stats from events
     for (const event of tickEvents) {
       if (event.type === "damaged" && event.data) {
         const sourceId = event.data.sourceId as string;
@@ -221,6 +213,18 @@ export function runMatch(setup: MatchSetup): MatchResult {
         const killedBy = event.data.killedBy as string;
         const killerStats = robotStats.get(killedBy);
         if (killerStats) killerStats.kills++;
+      }
+    }
+
+    // Dispatch emitted events to robot VMs (reactive handlers — no new actions this tick)
+    for (const event of tickEvents) {
+      if (event.type === "tick" || event.type === "spawn") continue;
+      const vm = robotVMs.get(event.robotId);
+      if (vm) {
+        const robot = world.getRobot(event.robotId);
+        if (robot?.alive) {
+          vm.executeEvent(event.type, event);
+        }
       }
     }
 
