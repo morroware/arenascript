@@ -113,6 +113,25 @@ describe("MatchRunner", () => {
     expect(response.record.participants[0].eloAtStart).toBe(p1Before);
     expect(response.record.participants[1].eloAtStart).toBe(p2Before);
   });
+
+  it("preserves non-ranked match modes for unranked matches", () => {
+    const store = new RatingStore();
+    const runner = new MatchRunner(store);
+    const a = compileBot(BOT_A);
+    const b = compileBot(BOT_B);
+
+    const response = runner.runUnrankedMatch({
+      player1: { playerId: "p1", ...a },
+      player2: { playerId: "p2", ...b },
+      config: {
+        mode: "2v2",
+        arenaWidth: 100, arenaHeight: 100,
+        maxTicks: 1000, tickRate: 30, seed: 1338,
+      },
+    });
+
+    expect(response.record.config.mode).toBe("2v2");
+  });
 });
 
 describe("MatchmakingQueue", () => {
@@ -226,5 +245,27 @@ describe("LobbyManager", () => {
     expect(response).not.toBeNull();
     expect(response!.record.status).toBe("completed");
     expect(lobby.status).toBe("completed");
+  });
+
+  it("runs FFA with all ready players", () => {
+    const store = new RatingStore();
+    const runner = new MatchRunner(store);
+    const queue = new MatchmakingQueue(store);
+    const mgr = new LobbyManager(runner, queue);
+    const a = compileBot(BOT_A);
+    const b = compileBot(BOT_B);
+
+    const lobby = mgr.createLobby("p1", "FFA Room", "ffa");
+    mgr.joinLobby(lobby.id, "p2");
+    mgr.joinLobby(lobby.id, "p3");
+
+    mgr.submitProgram(lobby.id, "p1", a.program, a.constants);
+    mgr.submitProgram(lobby.id, "p2", b.program, b.constants);
+    mgr.submitProgram(lobby.id, "p3", a.program, a.constants);
+
+    const response = mgr.startMatch(lobby.id);
+    expect(response).not.toBeNull();
+    expect(response!.record.config.mode).toBe("ffa");
+    expect(response!.record.participants).toHaveLength(3);
   });
 });

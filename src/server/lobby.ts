@@ -126,24 +126,21 @@ export class LobbyManager {
     const lobby = this.lobbies.get(lobbyId);
     if (!lobby || lobby.status !== "ready") return null;
 
-    const p1 = lobby.players[0];
-    const p2 = lobby.players[1];
+    const readyPlayers = lobby.players
+      .filter(p => p.program && p.constants)
+      .map(p => ({
+        playerId: p.playerId,
+        program: p.program!,
+        constants: p.constants!,
+        teamId: p.teamId,
+      }));
 
-    if (!p1?.program || !p2?.program || !p1.constants || !p2.constants) return null;
+    if (readyPlayers.length < 2) return null;
 
     lobby.status = "in_match";
 
-    const response = this.matchRunner.runUnrankedMatch({
-      player1: {
-        playerId: p1.playerId,
-        program: p1.program,
-        constants: p1.constants,
-      },
-      player2: {
-        playerId: p2.playerId,
-        program: p2.program,
-        constants: p2.constants,
-      },
+    const response = this.matchRunner.runUnrankedMatchWithParticipants({
+      participants: readyPlayers,
       config: {
         mode: lobby.mode,
         arenaWidth: 100,
