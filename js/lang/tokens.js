@@ -132,7 +132,7 @@ export class Lexer {
       }
 
       // Numbers
-      if (this.#isDigit(ch) || (ch === "-" && this.#isDigit(this.#peek(1)))) {
+      if (this.#isDigit(ch)) {
         this.#readNumber();
         continue;
       }
@@ -282,10 +282,6 @@ export class Lexer {
     const startLine = this.#line;
     const startCol = this.#column;
     let value = "";
-
-    if (this.#source[this.#pos] === "-") {
-      value += this.#advance();
-    }
 
     while (this.#pos < this.#source.length && this.#isDigit(this.#source[this.#pos])) {
       value += this.#advance();
