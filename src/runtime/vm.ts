@@ -363,7 +363,10 @@ export class VM {
           intent.target = arg;
         }
       } else if (arg && typeof arg === "object" && "x" in arg && "y" in arg) {
-        intent.target = arg as Vec2;
+        intent.target = {
+          x: Number((arg as { x: unknown }).x),
+          y: Number((arg as { y: unknown }).y),
+        };
       } else if (arg && typeof arg === "object" && "id" in arg) {
         intent.target = (arg as { id: string }).id;
       }

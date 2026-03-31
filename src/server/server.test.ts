@@ -91,6 +91,28 @@ describe("MatchRunner", () => {
     expect(response.replay.frames.length).toBeGreaterThan(0);
     expect(runner.getMatchCount()).toBe(1);
   });
+
+  it("records pre-match Elo in match participants", () => {
+    const store = new RatingStore();
+    const runner = new MatchRunner(store);
+    const a = compileBot(BOT_A);
+    const b = compileBot(BOT_B);
+
+    const p1Before = store.getOrCreate("p1").elo;
+    const p2Before = store.getOrCreate("p2").elo;
+    const response = runner.runRankedMatch({
+      player1: { playerId: "p1", ...a },
+      player2: { playerId: "p2", ...b },
+      config: {
+        mode: "1v1_ranked",
+        arenaWidth: 100, arenaHeight: 100,
+        maxTicks: 1000, tickRate: 30, seed: 1337,
+      },
+    });
+
+    expect(response.record.participants[0].eloAtStart).toBe(p1Before);
+    expect(response.record.participants[1].eloAtStart).toBe(p2Before);
+  });
 });
 
 describe("MatchmakingQueue", () => {

@@ -114,7 +114,8 @@ export function runMatch(setup: MatchSetup): MatchResult {
 
     // Phase 2: Build sensor views (handled lazily by sensor gateway)
     // Phase 3 & 4: Execute robot programs and collect action intents
-    const allActions = new Map<EntityId, ActionIntent>();
+    const movementActions = new Map<EntityId, ActionIntent>();
+    const combatActions = new Map<EntityId, ActionIntent>();
 
     for (const [robotId, vm] of robotVMs) {
       const robot = world.getRobot(robotId);
@@ -132,19 +133,17 @@ export function runMatch(setup: MatchSetup): MatchResult {
       if (result.actions.length > 0) {
         const { movement, combat, utility } = categorizeActions(result.actions);
         // Store primary actions
-        if (combat) {
-          const validated = validateAction(combat, robot);
-          if (validated.valid) {
-            allActions.set(robotId, combat);
-            robotStats.get(robotId)!.actionsExecuted++;
-          }
-        }
         if (movement) {
           const validated = validateAction(movement, robot);
           if (validated.valid) {
-            if (!allActions.has(robotId)) {
-              allActions.set(robotId, movement);
-            }
+            movementActions.set(robotId, movement);
+            robotStats.get(robotId)!.actionsExecuted++;
+          }
+        }
+        if (combat) {
+          const validated = validateAction(combat, robot);
+          if (validated.valid) {
+            combatActions.set(robotId, combat);
             robotStats.get(robotId)!.actionsExecuted++;
           }
         }
@@ -153,13 +152,7 @@ export function runMatch(setup: MatchSetup): MatchResult {
 
     // Phase 5: Resolve movement
     for (const robot of world.getAliveRobots()) {
-      const actions = [...allActions.entries()]
-        .filter(([id]) => id === robot.id)
-        .map(([_, a]) => a);
-      const movementAction = actions.find(a =>
-        ["move_to", "move_toward", "strafe_left", "strafe_right", "stop", "retreat"].includes(a.type),
-      );
-      resolveMovement(world, robot, movementAction ?? null);
+      resolveMovement(world, robot, movementActions.get(robot.id) ?? null);
     }
 
     // Phase 6: Apply movement and resolve collisions
@@ -170,7 +163,7 @@ export function runMatch(setup: MatchSetup): MatchResult {
 
     // Phase 7: Resolve attacks and abilities
     for (const robot of world.getAliveRobots()) {
-      const combatAction = allActions.get(robot.id);
+      const combatAction = combatActions.get(robot.id);
       if (combatAction && ["attack", "fire_at", "use_ability", "shield"].includes(combatAction.type)) {
         resolveCombat(world, robot, combatAction);
       }
@@ -229,7 +222,10 @@ export function runMatch(setup: MatchSetup): MatchResult {
     }
 
     // Phase 10: Write replay trace
-    replayWriter.captureFrame(world, tickEvents, allActions);
+    const replayActions = new Map<EntityId, ActionIntent>();
+    for (const [robotId, action] of movementActions) replayActions.set(robotId, action);
+    for (const [robotId, action] of combatActions) replayActions.set(robotId, action);
+    replayWriter.captureFrame(world, tickEvents, replayActions);
 
     // Phase 11: Check win conditions
     const winResult = checkWinCondition(world);
