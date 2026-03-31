@@ -164,6 +164,7 @@ export class Parser {
   // --- Type Annotations ---
 
   #parseTypeAnnotation() {
+    const span = this.#currentSpan();
     const name = this.#expect(TokenType.Identifier).value;
     let generic;
     if (name === "list" && this.#check(TokenType.Less)) {
@@ -173,7 +174,7 @@ export class Parser {
     }
     const nullable = this.#check(TokenType.QuestionMark);
     if (nullable) this.#advance();
-    return { kind: "TypeAnnotation", name, nullable, generic };
+    return { kind: "TypeAnnotation", name, nullable, generic, span };
   }
 
   // --- Statements ---

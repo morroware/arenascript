@@ -11,8 +11,12 @@
 
   <!-- Top Bar -->
   <header class="top-bar">
-    <h1>ARENA<span>SCRIPT</span></h1>
+    <div class="top-bar-left">
+      <h1>ARENA<span>SCRIPT</span></h1>
+    </div>
     <div class="top-bar-actions">
+      <span class="shortcut-hint">Ctrl+Enter Compile</span>
+      <span class="shortcut-hint">Ctrl+Shift+Enter Run</span>
       <span class="version-badge">Engine v0.1.0</span>
     </div>
   </header>
@@ -22,7 +26,7 @@
 
     <!-- Sidebar: Bot Presets -->
     <aside class="sidebar">
-      <div class="sidebar-header">Example Bots</div>
+      <div class="sidebar-header">Bots</div>
 
       <button class="bot-preset active" data-bot="bruiser" title="Bruiser — Aggressive Brawler">
         <div class="bot-class-icon brawler">B</div>
@@ -77,6 +81,7 @@
         <div class="spacer"></div>
         <button id="btn-compile" class="btn btn-compile">Compile</button>
         <button id="btn-run" class="btn btn-run" disabled>Run Match</button>
+        <button id="btn-compile-run" class="btn btn-compile-run">Compile &amp; Run</button>
       </div>
 
       <!-- Workspace: Editor + Arena -->
@@ -84,8 +89,17 @@
 
         <!-- Code Editor -->
         <div class="editor-pane">
-          <textarea id="code-editor" class="code-editor" spellcheck="false"
-            placeholder="Write your ArenaScript robot program here..."></textarea>
+          <div class="editor-container">
+            <div class="line-numbers" id="line-numbers" aria-hidden="true"></div>
+            <div class="editor-code-area">
+              <pre class="highlight-layer" id="highlight-layer" aria-hidden="true"></pre>
+              <textarea id="code-editor" class="code-input" spellcheck="false"
+                placeholder="Write your ArenaScript robot program here..."
+                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+            </div>
+          </div>
+          <!-- Error Bar -->
+          <div id="error-bar" class="error-bar"></div>
         </div>
 
         <!-- Arena Pane -->
@@ -95,8 +109,27 @@
             <span id="arena-status">Idle</span>
           </div>
           <div class="arena-canvas-wrap">
-            <canvas id="arena-canvas" width="380" height="380"></canvas>
+            <canvas id="arena-canvas" width="400" height="400"></canvas>
           </div>
+
+          <!-- Replay Controls -->
+          <div class="replay-controls" id="replay-controls">
+            <button id="btn-replay-toggle" class="replay-btn" title="Play / Pause">&#9654;</button>
+            <input id="replay-scrubber" class="replay-scrubber" type="range" min="0" max="100" value="0">
+            <span id="replay-tick-label" class="replay-tick-label">0 / 0</span>
+            <label class="speed-label">
+              Speed
+              <select id="replay-speed" class="replay-speed-select">
+                <option value="0.25">0.25x</option>
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+                <option value="8">8x</option>
+              </select>
+            </label>
+          </div>
+
           <!-- Match Results -->
           <div id="match-results" class="match-results">
             <div class="match-results-title">Match Results</div>

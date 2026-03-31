@@ -210,6 +210,14 @@ export class SemanticAnalyzer {
       case "CallExpr":
         if (!BUILTIN_SENSORS.has(expr.callee) && !this.#functions.has(expr.callee)) {
           this.#addError(`Unknown function '${expr.callee}'`, expr.span.line, expr.span.column);
+        } else if (this.#functions.has(expr.callee)) {
+          const fn = this.#functions.get(expr.callee);
+          if (fn.params.length !== expr.args.length) {
+            this.#addError(
+              `Function '${expr.callee}' expects ${fn.params.length} argument(s), got ${expr.args.length}`,
+              expr.span.line, expr.span.column,
+            );
+          }
         }
         for (const arg of expr.args) {
           this.#validateExpression(arg);
@@ -243,11 +251,13 @@ export class SemanticAnalyzer {
   }
 
   #validateType(type) {
+    const line = type.span ? type.span.line : 0;
+    const col = type.span ? type.span.column : 0;
     if (!VALID_TYPES.has(type.name)) {
-      this.#addError(`Unknown type '${type.name}'`, 0, 0);
+      this.#addError(`Unknown type '${type.name}'`, line, col);
     }
     if (type.generic && !VALID_TYPES.has(type.generic)) {
-      this.#addError(`Unknown generic type '${type.generic}'`, 0, 0);
+      this.#addError(`Unknown generic type '${type.generic}'`, line, col);
     }
   }
 

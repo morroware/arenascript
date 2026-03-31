@@ -6,10 +6,13 @@ import { Op } from "./opcodes.js";
 import { ExecutionBudget, BudgetExceededError } from "./budget.js";
 
 export class VM {
+  static MAX_STACK_DEPTH = 1024;
+  static MAX_CALL_DEPTH = 64;
+
   constructor(program, robotId, sensorGateway) {
     this.program = program;
     this.bytecode = program.bytecode;
-    this.constants = this.rebuildConstants(program.bytecode);
+    this.constants = []; // Set via setConstants() after construction
     this.robotId = robotId;
     this.sensorGateway = sensorGateway;
     this.budget = new ExecutionBudget();
@@ -159,6 +162,9 @@ export class VM {
           // Functions
           case Op.CALL: {
             this.budget.callFunction();
+            if (this.callStack.length >= VM.MAX_CALL_DEPTH) {
+              throw new Error("Call stack overflow: maximum recursion depth exceeded");
+            }
             const target = this.readU16();
             this.callStack.push({ returnAddress: this.ip, baseSlot: 0 });
             this.ip = target;
@@ -282,6 +288,9 @@ export class VM {
   // --- Stack helpers ---
 
   push(val) {
+    if (this.stack.length >= VM.MAX_STACK_DEPTH) {
+      throw new Error("Stack overflow: maximum depth exceeded");
+    }
     this.stack.push(val);
   }
 
@@ -354,13 +363,6 @@ export class VM {
       }
     }
     return obj;
-  }
-
-  /** Rebuild constant pool from bytecode — for PoC we store it alongside the program */
-  rebuildConstants(_bytecode) {
-    // In the PoC the compiler returns the program with constants embedded.
-    // We store them separately. This is a placeholder for a proper serialization format.
-    return [];
   }
 
   /** Set the constant pool directly (used by the match runner) */

@@ -102,6 +102,8 @@ export class Compiler {
   #stateIndexMap = new Map();
   #constMap = new Map();
   #functionOffsets = new Map();
+  #userFunctionNames = new Set();
+  #pendingCalls = [];
 
   compile(program) {
     const builder = new ChunkBuilder();
@@ -137,8 +139,12 @@ export class Compiler {
       }
     }
 
-    // Two-pass function compilation for forward references:
-    // Pass 1: Compile all functions first so their offsets are known
+    // Pre-register all function names so forward references resolve correctly
+    for (const fn of program.functions) {
+      this.#userFunctionNames.add(fn.name);
+    }
+
+    // Compile all functions, recording their bytecode offsets
     const functions = new Map();
     for (const fn of program.functions) {
       const offset = builder.code.length;
@@ -147,7 +153,16 @@ export class Compiler {
       this.#compileFunction(fn, builder);
     }
 
-    // Pass 2: Compile event handlers (can now reference any function)
+    // Back-patch any forward function references
+    for (const pending of this.#pendingCalls) {
+      const target = this.#functionOffsets.get(pending.name);
+      if (target !== undefined) {
+        builder.code[pending.offset + 1] = (target >> 8) & 0xff;
+        builder.code[pending.offset + 2] = target & 0xff;
+      }
+    }
+
+    // Compile event handlers (can now reference any function)
     const eventHandlers = new Map();
     for (const handler of program.handlers) {
       const offset = builder.code.length;
@@ -371,11 +386,30 @@ export class Compiler {
       }
 
       case "BinaryExpr": {
+        if (expr.operator === "and") {
+          // Short-circuit: if left is falsy, skip right entirely
+          this.#compileExpression(expr.left, b);
+          b.emit(Op.DUP);
+          const skipRight = b.emitJump(Op.JMP_IF_FALSE);
+          b.emit(Op.POP); // discard truthy left value
+          this.#compileExpression(expr.right, b);
+          b.patchJump(skipRight);
+          break;
+        }
+        if (expr.operator === "or") {
+          // Short-circuit: if left is truthy, skip right entirely
+          this.#compileExpression(expr.left, b);
+          b.emit(Op.DUP);
+          const skipRight = b.emitJump(Op.JMP_IF_TRUE);
+          b.emit(Op.POP); // discard falsy left value
+          this.#compileExpression(expr.right, b);
+          b.patchJump(skipRight);
+          break;
+        }
         this.#compileExpression(expr.left, b);
         this.#compileExpression(expr.right, b);
         const opMap = {
           "+": Op.ADD, "-": Op.SUB, "*": Op.MUL, "/": Op.DIV, "%": Op.MOD,
-          "and": Op.AND, "or": Op.OR,
         };
         b.emit(opMap[expr.operator], expr.span.line, expr.span.column);
         break;
@@ -403,9 +437,13 @@ export class Compiler {
         for (const arg of expr.args) {
           this.#compileExpression(arg, b);
         }
-        // Check if it's a user function or built-in
+        // Check if it's a user function (already compiled or forward reference) or built-in
         if (this.#functionOffsets.has(expr.callee)) {
           b.emitWithOperand(Op.CALL, this.#functionOffsets.get(expr.callee), expr.span.line, expr.span.column);
+        } else if (this.#userFunctionNames.has(expr.callee)) {
+          // Forward reference — emit placeholder CALL, will be back-patched
+          const offset = b.emitWithOperand(Op.CALL, 0, expr.span.line, expr.span.column);
+          this.#pendingCalls.push({ offset, name: expr.callee });
         } else {
           // Built-in call — encode name as constant
           const nameIdx = b.addConstant({ type: "string", value: expr.callee });
