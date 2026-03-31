@@ -66,29 +66,43 @@ export class MatchRunner {
     }
     /** Run an unranked match (no Elo changes) */
     runUnrankedMatch(request) {
-        const unrankedConfig = { ...request.config, mode: "1v1_unranked" };
-        const setup = {
+        const unrankedConfig = request.config.mode === "1v1_ranked"
+            ? { ...request.config, mode: "1v1_unranked" }
+            : request.config;
+        return this.runUnrankedMatchWithParticipants({
             config: unrankedConfig,
             participants: [
                 {
+                    playerId: request.player1.playerId,
                     program: request.player1.program,
                     constants: request.player1.constants,
-                    playerId: request.player1.playerId,
                     teamId: 0,
                 },
                 {
+                    playerId: request.player2.playerId,
                     program: request.player2.program,
                     constants: request.player2.constants,
-                    playerId: request.player2.playerId,
                     teamId: 1,
                 },
             ],
+        });
+    }
+    /** Run an unranked match for any participant count (no Elo changes) */
+    runUnrankedMatchWithParticipants(request) {
+        const setup = {
+            config: request.config,
+            participants: request.participants.map(p => ({
+                program: p.program,
+                constants: p.constants,
+                playerId: p.playerId,
+                teamId: p.teamId,
+            })),
         };
         const result = runMatch(setup);
         const matchId = result.replay.metadata.matchId;
         const record = {
             matchId,
-            config: unrankedConfig,
+            config: request.config,
             participants: result.replay.metadata.participants,
             status: "completed",
             winner: result.winner,
