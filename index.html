@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArenaScript — Robot Arena Combat</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>&#x1F916;</text></svg>">
+</head>
+<body>
+
+  <!-- Top Bar -->
+  <header class="top-bar">
+    <h1>ARENA<span>SCRIPT</span></h1>
+    <div class="top-bar-actions">
+      <span class="version-badge">Engine v0.1.0</span>
+    </div>
+  </header>
+
+  <!-- App Layout -->
+  <div class="app-layout">
+
+    <!-- Sidebar: Bot Presets -->
+    <aside class="sidebar">
+      <div class="sidebar-header">Example Bots</div>
+
+      <button class="bot-preset active" data-bot="bruiser" title="Bruiser — Aggressive Brawler">
+        <div class="bot-class-icon brawler">B</div>
+        <div class="bot-preset-info">
+          <span class="bot-preset-name">Bruiser</span>
+          <span class="bot-preset-class">Brawler</span>
+        </div>
+      </button>
+
+      <button class="bot-preset" data-bot="kiter" title="Kiter — Ranged Ranger">
+        <div class="bot-class-icon ranger">K</div>
+        <div class="bot-preset-info">
+          <span class="bot-preset-name">Kiter</span>
+          <span class="bot-preset-class">Ranger</span>
+        </div>
+      </button>
+
+      <button class="bot-preset" data-bot="fortress" title="Fortress — Defensive Tank">
+        <div class="bot-class-icon tank">F</div>
+        <div class="bot-preset-info">
+          <span class="bot-preset-name">Fortress</span>
+          <span class="bot-preset-class">Tank</span>
+        </div>
+      </button>
+
+      <button class="bot-preset" data-bot="healer" title="Healer — Support">
+        <div class="bot-class-icon support">H</div>
+        <div class="bot-preset-info">
+          <span class="bot-preset-name">Healer</span>
+          <span class="bot-preset-class">Support</span>
+        </div>
+      </button>
+
+      <!-- Opponent Selector -->
+      <div class="sidebar-section">
+        <label for="opponent-select">Opponent</label>
+        <select id="opponent-select" class="opponent-select">
+          <option value="bruiser">Bruiser</option>
+          <option value="kiter" selected>Kiter</option>
+          <option value="fortress">Fortress</option>
+          <option value="healer">Healer</option>
+        </select>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- Editor Toolbar -->
+      <div class="editor-toolbar">
+        <div class="file-tab"><span class="dot"></span>robot.arena</div>
+        <div class="spacer"></div>
+        <button id="btn-compile" class="btn btn-compile">Compile</button>
+        <button id="btn-run" class="btn btn-run" disabled>Run Match</button>
+      </div>
+
+      <!-- Workspace: Editor + Arena -->
+      <div class="workspace">
+
+        <!-- Code Editor -->
+        <div class="editor-pane">
+          <textarea id="code-editor" class="code-editor" spellcheck="false"
+            placeholder="Write your ArenaScript robot program here..."></textarea>
+        </div>
+
+        <!-- Arena Pane -->
+        <div class="arena-pane">
+          <div class="arena-header">
+            <span class="label">Arena</span>
+            <span id="arena-status">Idle</span>
+          </div>
+          <div class="arena-canvas-wrap">
+            <canvas id="arena-canvas" width="380" height="380"></canvas>
+          </div>
+          <!-- Match Results -->
+          <div id="match-results" class="match-results">
+            <div class="match-results-title">Match Results</div>
+            <div id="results-content" class="result-grid"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Console -->
+      <div class="console-pane">
+        <div class="console-header">
+          <span class="label">Console</span>
+          <button id="btn-clear" class="console-clear-btn">Clear</button>
+        </div>
+        <div id="console-output" class="console-output"></div>
+      </div>
+
+    </main>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
