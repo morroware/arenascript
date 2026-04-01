@@ -161,7 +161,7 @@ export function runMatch(setup) {
     // Phase 7: Resolve attacks and abilities
     for (const robot of world.getAliveRobots()) {
       const combatAction = combatActions.get(robot.id);
-      if (combatAction && ["attack", "fire_at", "use_ability", "shield"].includes(combatAction.type)) {
+      if (combatAction && ["attack", "fire_at", "burst_fire", "grenade", "use_ability", "shield"].includes(combatAction.type)) {
         resolveCombat(world, robot, combatAction);
       }
     }
@@ -172,16 +172,27 @@ export function runMatch(setup) {
 
     // Update capture points
     for (const cp of world.controlPoints.values()) {
+      // Gather which teams have robots in capture range
+      const teamsInRange = new Set();
       for (const robot of world.getAliveRobots()) {
         if (distance(robot.position, cp.position) <= CAPTURE_RADIUS) {
-          if (cp.owner !== robot.teamId) {
-            cp.captureProgress += CAPTURE_RATE;
-            if (cp.captureProgress >= CAPTURE_WIN_THRESHOLD) {
-              cp.owner = robot.teamId;
-              cp.captureProgress = 0;
-            }
+          teamsInRange.add(robot.teamId);
+        }
+      }
+
+      if (teamsInRange.size === 1) {
+        // Uncontested — one team capturing
+        const capturingTeam = [...teamsInRange][0];
+        if (cp.owner !== capturingTeam) {
+          cp.captureProgress += CAPTURE_RATE;
+          if (cp.captureProgress >= CAPTURE_WIN_THRESHOLD) {
+            cp.owner = capturingTeam;
+            cp.captureProgress = 0;
           }
         }
+      } else if (teamsInRange.size > 1) {
+        // Contested — progress decays toward zero
+        cp.captureProgress = Math.max(0, cp.captureProgress - CAPTURE_RATE);
       }
     }
 

@@ -6,8 +6,6 @@ export const TokenType = Object.freeze({
   // Literals
   Number: "Number",
   String: "String",
-  Boolean: "Boolean",
-  Null: "Null",
 
   // Identifiers & Keywords
   Identifier: "Identifier",

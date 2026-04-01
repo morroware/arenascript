@@ -1140,7 +1140,13 @@ function replayTick(timestamp) {
   if (elapsed >= msPerFrame) {
     lastReplayTimestamp = timestamp;
 
+    if (replayFrameIndex >= replayData.length) {
+      replayPlaying = false;
+      btnReplayToggle.textContent = "\u25B6";
+      return;
+    }
     const frame = replayData[replayFrameIndex];
+    if (!frame) return;
     drawFrame(frame, replayLabels);
     replayScrubber.value = replayFrameIndex;
     replayTickLabel.textContent = `${frame.tick} / ${replayData[replayData.length - 1].tick}`;

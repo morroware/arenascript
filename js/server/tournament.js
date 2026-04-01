@@ -199,7 +199,11 @@ export class TournamentManager {
                 completed: false,
             });
         }
-        // Bye for odd participant (auto-advance highest remaining)
+        // Bye for odd participant (auto-advance highest remaining seed)
+        if (sorted.length % 2 !== 0) {
+            const byePlayer = sorted[Math.floor(sorted.length / 2)];
+            byePlayer.wins++;
+        }
         return matches;
     }
     generateRoundRobinPairings(tournament, roundIndex) {
