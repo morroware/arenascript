@@ -49,6 +49,39 @@ const VALID_TYPES = new Set([
   "control_point", "event", "position", "list",
 ]);
 
+/** Find the closest match from a set of candidates using Levenshtein distance */
+function findClosestMatch(name, candidates, maxDistance = 3) {
+  let best = null;
+  let bestDist = maxDistance + 1;
+  for (const candidate of candidates) {
+    const dist = levenshtein(name.toLowerCase(), candidate.toLowerCase());
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function levenshtein(a, b) {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      const cost = a[j - 1] === b[i - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost,
+      );
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
 export class SemanticAnalyzer {
   #diagnostics = [];
   #constants = new Set();
@@ -148,7 +181,9 @@ export class SemanticAnalyzer {
     const seenEvents = new Set();
     for (const handler of program.handlers) {
       if (!VALID_EVENTS.has(handler.event)) {
-        this.#addError(`Unknown event '${handler.event}'`, handler.span.line, handler.span.column);
+        const suggestion = findClosestMatch(handler.event, VALID_EVENTS);
+        const hint = suggestion ? `. Did you mean '${suggestion}'?` : "";
+        this.#addError(`Unknown event '${handler.event}'${hint}`, handler.span.line, handler.span.column);
       }
       if (seenEvents.has(handler.event)) {
         this.#addError(`Duplicate handler for event '${handler.event}'`, handler.span.line, handler.span.column);
@@ -240,7 +275,9 @@ export class SemanticAnalyzer {
 
       case "ActionStatement":
         if (!VALID_ACTIONS.has(stmt.action)) {
-          this.#addError(`Unknown action '${stmt.action}'`, stmt.span.line, stmt.span.column);
+          const suggestion = findClosestMatch(stmt.action, VALID_ACTIONS);
+          const hint = suggestion ? `. Did you mean '${suggestion}'?` : "";
+          this.#addError(`Unknown action '${stmt.action}'${hint}`, stmt.span.line, stmt.span.column);
         }
         for (const arg of stmt.args) {
           this.#validateExpression(arg);
@@ -277,7 +314,9 @@ export class SemanticAnalyzer {
 
       case "CallExpr":
         if (!BUILTIN_SENSORS.has(expr.callee) && !this.#functions.has(expr.callee)) {
-          this.#addError(`Unknown function '${expr.callee}'`, expr.span.line, expr.span.column);
+          const suggestion = findClosestMatch(expr.callee, BUILTIN_SENSORS);
+          const hint = suggestion ? `. Did you mean '${suggestion}'?` : "";
+          this.#addError(`Unknown function '${expr.callee}'${hint}`, expr.span.line, expr.span.column);
         } else if (this.#functions.has(expr.callee)) {
           const fn = this.#functions.get(expr.callee);
           if (fn.params.length !== expr.args.length) {
@@ -322,10 +361,14 @@ export class SemanticAnalyzer {
     const line = type.span ? type.span.line : 0;
     const col = type.span ? type.span.column : 0;
     if (!VALID_TYPES.has(type.name)) {
-      this.#addError(`Unknown type '${type.name}'`, line, col);
+      const suggestion = findClosestMatch(type.name, VALID_TYPES);
+      const hint = suggestion ? `. Did you mean '${suggestion}'?` : "";
+      this.#addError(`Unknown type '${type.name}'${hint}`, line, col);
     }
     if (type.generic && !VALID_TYPES.has(type.generic)) {
-      this.#addError(`Unknown generic type '${type.generic}'`, line, col);
+      const suggestion = findClosestMatch(type.generic, VALID_TYPES);
+      const hint = suggestion ? `. Did you mean '${suggestion}'?` : "";
+      this.#addError(`Unknown generic type '${type.generic}'${hint}`, line, col);
     }
   }
 

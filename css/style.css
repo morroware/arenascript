@@ -598,6 +598,21 @@ body {
   border-color: var(--accent-cyan);
 }
 
+.replay-btn.bookmark-btn {
+  width: auto;
+  border-radius: var(--radius);
+  padding: 0 8px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--accent-orange);
+  border-color: rgba(255, 136, 0, 0.3);
+}
+
+.replay-btn.bookmark-btn:hover {
+  border-color: var(--accent-orange);
+  background: rgba(255, 136, 0, 0.1);
+}
+
 .replay-btn.step-btn {
   width: 24px;
   height: 24px;

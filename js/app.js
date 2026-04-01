@@ -8,6 +8,10 @@ import {
   ARENA_WIDTH, ARENA_HEIGHT,
   CLASS_STATS, ENGINE_VERSION,
 } from "./shared/config.js";
+import { Telemetry } from "./shared/telemetry.js";
+import { computeBookmarks } from "./engine/replay.js";
+
+const telemetry = Telemetry.instance();
 
 // ============================================================================
 // Example Bot Source Code
@@ -664,6 +668,7 @@ const opponentSelect = document.getElementById("opponent-select");
 const matchModeSelect = document.getElementById("match-mode");
 const teamPresetSelect = document.getElementById("team-preset-select");
 const btnRunTeamSim = document.getElementById("btn-run-team-sim");
+const seedInput = document.getElementById("seed-input");
 const presetButtons = document.querySelectorAll(".bot-preset");
 
 // Replay controls
@@ -675,6 +680,9 @@ const replayScrubber = document.getElementById("replay-scrubber");
 const replayTickLabel = document.getElementById("replay-tick-label");
 const replaySpeedSelect = document.getElementById("replay-speed");
 const resultsRobotDetailEl = document.getElementById("results-robot-detail");
+
+const btnBookmarkDamage = document.getElementById("btn-bookmark-damage");
+const btnBookmarkKill = document.getElementById("btn-bookmark-kill");
 
 const ctx = canvasEl.getContext("2d");
 
@@ -695,6 +703,17 @@ let replayAnimId = null;
 let replayLabels = {};
 let replaySpeed = 1;
 let lastReplayTimestamp = 0;
+let lastReplayBookmarks = null;
+
+/** Get seed from UI input, or generate a random one */
+function getMatchSeed() {
+  const val = seedInput?.value?.trim();
+  if (val !== "" && val !== undefined) {
+    const parsed = parseInt(val, 10);
+    if (!isNaN(parsed) && parsed >= 0) return parsed;
+  }
+  return Math.floor(Math.random() * 100000);
+}
 
 // ============================================================================
 // Syntax Highlighting
@@ -710,6 +729,9 @@ const ACTIONS = new Set([
   "move_to", "move_toward", "strafe_left", "strafe_right", "stop",
   "attack", "fire_at", "use_ability", "shield", "retreat",
   "mark_target", "capture", "ping",
+  "burst_fire", "grenade",
+  "move_forward", "move_backward", "turn_left", "turn_right",
+  "place_mine", "send_signal", "mark_position", "taunt", "overwatch",
 ]);
 
 const BUILTINS = new Set([
@@ -717,9 +739,18 @@ const BUILTINS = new Set([
   "nearest_enemy", "visible_enemies", "enemy_count_in_range",
   "nearest_ally", "visible_allies",
   "nearest_cover", "nearest_resource", "nearest_control_point",
-  "nearest_enemy_control_point",
+  "nearest_enemy_control_point", "nearest_heal_zone", "nearest_hazard",
   "distance_to", "line_of_sight", "current_tick",
-  "can_attack",
+  "can_attack", "scan", "scan_enemies", "last_seen_enemy", "has_recent_enemy_contact",
+  "enemy_visible", "random", "wall_ahead", "damage_percent",
+  "team_size", "my_index", "my_role",
+  "is_in_heal_zone", "is_in_hazard",
+  "arena_width", "arena_height", "spawn_position",
+  "discovered_count",
+  "health_percent", "angle_to", "is_facing", "enemy_heading",
+  "is_enemy_facing_me", "ally_health", "kills", "time_alive",
+  "nearest_sound", "nearest_mine", "nearest_pickup",
+  "recall_position", "is_taunted", "is_in_overwatch", "has_effect",
 ]);
 
 const TYPES = new Set([
@@ -935,10 +966,13 @@ function doCompile() {
   clearErrors();
   logToConsole("--- Compiling ---", "event");
 
+  const stopTimer = telemetry.startTimer(Telemetry.COMPILE_TIME_MS);
   try {
     const result = compile(source);
+    stopTimer();
 
     if (result.success) {
+      telemetry.increment(Telemetry.COMPILE_SUCCESS);
       compiledPlayer = { program: result.program, constants: result.constants };
       btnRun.disabled = false;
 
@@ -958,6 +992,7 @@ function doCompile() {
       }
       return true;
     } else {
+      telemetry.increment(Telemetry.COMPILE_FAILURE);
       compiledPlayer = null;
       btnRun.disabled = true;
 
@@ -1086,27 +1121,30 @@ function doRunMatch() {
       arenaHeight: ARENA_HEIGHT,
       maxTicks: 3000,
       tickRate: 30,
-      seed: Math.floor(Math.random() * 100000),
+      seed: getMatchSeed(),
     },
     participants,
   };
 
   let result;
   try {
+    telemetry.increment(Telemetry.MATCH_RUN);
     result = runMatch(setup);
   } catch (e) {
+    telemetry.increment(Telemetry.MATCH_ERROR);
     logToConsole(`Match error: ${e.message}`, "error");
     arenaStatus.textContent = "Error";
     return;
   }
 
+  telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
 
   const winnerLabel =
     result.winner === null ? "DRAW" :
     result.winner === 0 ? "Your Bot" : oppPreset.name;
 
-  logToConsole(`Winner: ${winnerLabel}  |  ${result.reason}  |  ${result.tickCount} ticks`, "success");
+  logToConsole(`Winner: ${winnerLabel}  |  ${result.reason}  |  ${result.tickCount} ticks  |  seed: ${setup.config.seed}`, "success");
 
   for (const [id, stats] of result.robotStats) {
     logToConsole(`  ${id}: dmg=${stats.damageDealt}  taken=${stats.damageTaken}  kills=${stats.kills}`, "stat");
@@ -1163,12 +1201,13 @@ function doRunTeamSimulation() {
       arenaHeight: ARENA_HEIGHT,
       maxTicks: 3000,
       tickRate: 30,
-      seed: Math.floor(Math.random() * 100000),
+      seed: getMatchSeed(),
     },
     participants,
   };
 
   const result = runMatch(setup);
+  telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
   const opponentName = teamPreset.name;
   logToConsole(`\n--- Team Simulation: ${teamPreset.name} ---`, "event");
@@ -1571,6 +1610,7 @@ function startReplay(result, opponentName) {
   }
 
   replayData = frames;
+  lastReplayBookmarks = computeBookmarks(frames);
   const labelsById = {};
   for (const p of result.replay.metadata?.participants ?? []) {
     if (p.teamId === 0 && p.playerId === "player") labelsById[p.robotId] = "You";
@@ -1580,6 +1620,13 @@ function startReplay(result, opponentName) {
   replayFrameIndex = 0;
   replayPlaying = true;
   replaySpeed = parseFloat(replaySpeedSelect.value) || 1;
+
+  // Log bookmarks to console
+  if (lastReplayBookmarks) {
+    const bm = lastReplayBookmarks;
+    if (bm.firstDamage !== null) logToConsole(`  Bookmark: First damage at tick ${frames[bm.firstDamage]?.tick ?? bm.firstDamage}`, "stat");
+    if (bm.firstKill !== null) logToConsole(`  Bookmark: First kill at tick ${frames[bm.firstKill]?.tick ?? bm.firstKill}`, "stat");
+  }
 
   // Setup controls
   replayControlsEl.classList.add("visible");
@@ -1682,6 +1729,25 @@ function stepReplayForward() {
   }
 }
 
+function jumpToBookmark(bookmarkName) {
+  if (!replayData || !lastReplayBookmarks) return;
+  const idx = lastReplayBookmarks[bookmarkName];
+  if (idx === null || idx === undefined) {
+    logToConsole(`No ${bookmarkName} bookmark found in this replay.`, "warn");
+    return;
+  }
+  stopReplay();
+  btnReplayToggle.textContent = "\u25B6";
+  replayFrameIndex = idx;
+  const frame = replayData[idx];
+  if (frame) {
+    drawFrame(frame, replayLabels);
+    replayScrubber.value = idx;
+    replayTickLabel.textContent = `${frame.tick} / ${replayData[replayData.length - 1].tick}`;
+    arenaStatus.textContent = `Tick ${frame.tick} (${bookmarkName})`;
+  }
+}
+
 function stepReplayBack() {
   if (!replayData) return;
   stopReplay();
@@ -1771,6 +1837,8 @@ presetButtons.forEach((btn) => {
 btnReplayToggle.addEventListener("click", toggleReplayPlayPause);
 btnReplayStep?.addEventListener("click", stepReplayForward);
 btnReplayStepBack?.addEventListener("click", stepReplayBack);
+btnBookmarkDamage?.addEventListener("click", () => jumpToBookmark("firstDamage"));
+btnBookmarkKill?.addEventListener("click", () => jumpToBookmark("firstKill"));
 replayScrubber.addEventListener("input", () => {
   stopReplay();
   btnReplayToggle.textContent = "\u25B6";
