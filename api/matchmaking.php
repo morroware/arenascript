@@ -93,8 +93,14 @@ class MatchmakingQueue
                     continue;
                 }
 
+                $p2WaitTime = ($now - $p2['enqueuedAt']) / 1000;
+                $p2EloRange = min(
+                    ELO_RANGE_BASE + $p2WaitTime * ELO_RANGE_EXPANSION_PER_SEC,
+                    MAX_ELO_RANGE,
+                );
+                $allowedRange = max($eloRange, $p2EloRange);
                 $eloDiff = abs($p1['elo'] - $p2['elo']);
-                if ($eloDiff <= $eloRange) {
+                if ($eloDiff <= $allowedRange) {
                     // Match found — remove both from queue (higher index first)
                     array_splice($this->queue, $j, 1);
                     array_splice($this->queue, $i, 1);
