@@ -23,6 +23,14 @@ export class VisibilityTracker {
       // enemy_seen: now visible, wasn't before
       for (const enemyId of currentlyVisible) {
         if (!previousSet.has(enemyId)) {
+          const enemy = world.getRobot(enemyId);
+          if (enemy) {
+            robot.memory.lastSeenEnemy = {
+              id: enemy.id,
+              position: { x: enemy.position.x, y: enemy.position.y },
+              tick: world.currentTick,
+            };
+          }
           world.emitEvent({
             type: "enemy_seen",
             tick: world.currentTick,
@@ -35,6 +43,14 @@ export class VisibilityTracker {
       // enemy_lost: was visible, no longer
       for (const enemyId of previousSet) {
         if (!currentlyVisible.has(enemyId)) {
+          const enemy = world.getRobot(enemyId);
+          if (enemy) {
+            robot.memory.lastSeenEnemy = {
+              id: enemy.id,
+              position: { x: enemy.position.x, y: enemy.position.y },
+              tick: world.currentTick,
+            };
+          }
           world.emitEvent({
             type: "enemy_lost",
             tick: world.currentTick,

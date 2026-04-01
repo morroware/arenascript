@@ -28,6 +28,8 @@ export const PROJECTILE_TTL = 20; // ticks
 export const LOS_RANGE = 150.0;
 export const DEFAULT_VISION_RANGE = 35.0;
 export const LOW_HEALTH_THRESHOLD = 25;
+export const ACTIVE_SCAN_RANGE = 22.0;
+export const ACTIVE_SCAN_MEMORY_TICKS = 45;
 // --- Abilities ---
 export const SHIELD_DURATION = 3; // ticks
 export const SHIELD_COOLDOWN = 30;

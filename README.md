@@ -157,7 +157,7 @@ on damaged(event) {
 | **Operators** | `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `not` |
 | **Events** | `on spawn`, `on tick`, `on damaged`, `on low_health` |
 | **Commands** | `attack`, `move_toward`, `move_to`, `retreat`, `shield`, `dash` |
-| **Sensors** | `nearest_enemy()`, `nearest_ally()`, `nearest_control_point()`, `health()`, `energy()`, `can_attack()` |
+| **Sensors** | `nearest_enemy()`, `scan()`, `scan_enemies()`, `last_seen_enemy()`, `nearest_ally()`, `nearest_control_point()`, `health()`, `energy()`, `can_attack()` |
 | **Functions** | `fn name(params) { ... }` for custom functions |
 
 ### Robot Classes

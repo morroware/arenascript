@@ -67,6 +67,9 @@ export class World {
       energy: stats.energy,
       maxEnergy: stats.energy,
       cooldowns: new Map(),
+      memory: {
+        lastSeenEnemy: null,
+      },
       alive: true,
       teamId,
       programId,

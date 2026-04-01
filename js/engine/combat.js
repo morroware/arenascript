@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { distance, normalize, sub, scale, add, vec2 } from "../shared/vec2.js";
+import { getVisibleEnemies, hasLineOfSight } from "./los.js";
 import {
   CLASS_STATS, ATTACK_DAMAGE, ATTACK_RANGE, ATTACK_COOLDOWN, ATTACK_ENERGY_COST,
   FIRE_AT_DAMAGE, FIRE_AT_RANGE, FIRE_AT_COOLDOWN, PROJECTILE_SPEED, PROJECTILE_TTL,
@@ -21,6 +22,8 @@ export function resolveCombat(world, robot, action) {
       if (!targetId) break;
       const target = world.getRobot(targetId);
       if (!target || !target.alive) break;
+      const visibleEnemyIds = new Set(getVisibleEnemies(world, robot).map(enemy => enemy.id));
+      if (!visibleEnemyIds.has(target.id)) break;
 
       const range = stats?.attackRange ?? ATTACK_RANGE;
       if (distance(robot.position, target.position) > range) break;
@@ -44,6 +47,7 @@ export function resolveCombat(world, robot, action) {
     case "fire_at": {
       const targetPos = resolveTargetPosition(world, action);
       if (!targetPos) break;
+      if (!hasLineOfSight(world, robot.position, targetPos)) break;
 
       if (distance(robot.position, targetPos) > FIRE_AT_RANGE) break;
 
