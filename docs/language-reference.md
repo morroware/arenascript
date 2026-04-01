@@ -290,11 +290,15 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | Sensor | Returns | Description |
 |--------|---------|-------------|
 | `nearest_enemy()` | entity or `null` | Closest visible enemy |
+| `scan(range?)` | entity or `null` | Actively scan nearby enemies (ignores LOS, max 22 units) |
+| `scan_enemies(range?)` | list | All enemies detected by active scan |
+| `last_seen_enemy()` | entity or `null` | Last remembered enemy contact with `age` and `last_seen_tick` |
+| `has_recent_enemy_contact(max_age?)` | boolean | Whether memory contains recent enemy contact |
 | `nearest_ally()` | entity or `null` | Closest visible ally |
 | `nearest_control_point()` | position | Nearest capture point |
 | `health()` | number | Current health |
 | `energy()` | number | Current energy |
-| `can_attack(target)` | boolean | Whether target is in attack range and off cooldown |
+| `can_attack(target)` | boolean | Whether target is visible, in range, and off cooldown |
 | `distance_to(position)` | number | Distance from robot to a position |
 | `visible_enemies()` | list | All enemies within line-of-sight |
 | `visible_allies()` | list | All allies within line-of-sight |

@@ -4,7 +4,12 @@
 
 import { getVisibleEnemies, getVisibleAllies, hasLineOfSight } from "./los.js";
 import { distance } from "../shared/vec2.js";
-import { ATTACK_RANGE, CLASS_STATS } from "../shared/config.js";
+import {
+  ACTIVE_SCAN_MEMORY_TICKS,
+  ACTIVE_SCAN_RANGE,
+  ATTACK_RANGE,
+  CLASS_STATS,
+} from "../shared/config.js";
 
 /** Convert a RobotState to a safe VM-visible object */
 function robotToSensorView(robot) {
@@ -18,6 +23,27 @@ function robotToSensorView(robot) {
 
 /** Create the sensor gateway for a given world */
 export function createSensorGateway(world) {
+  const mapRobotView = (targetRobot) => robotToSensorView(targetRobot);
+  const scanEnemies = (robot, range) => {
+    const detected = [];
+    for (const other of world.robots.values()) {
+      if (!other.alive) continue;
+      if (other.teamId === robot.teamId) continue;
+      if (distance(robot.position, other.position) > range) continue;
+      detected.push(other);
+    }
+    detected.sort((a, b) => distance(robot.position, a.position) - distance(robot.position, b.position));
+    if (detected.length > 0) {
+      const nearest = detected[0];
+      robot.memory.lastSeenEnemy = {
+        id: nearest.id,
+        position: { x: nearest.position.x, y: nearest.position.y },
+        tick: world.currentTick,
+      };
+    }
+    return detected.map(mapRobotView);
+  };
+
   return (robotId, sensorName, args) => {
     const robot = world.getRobot(robotId);
     if (!robot || !robot.alive) return null;
@@ -51,7 +77,7 @@ export function createSensorGateway(world) {
       case "nearest_enemy": {
         const visible = getVisibleEnemies(world, robot);
         if (visible.length === 0) return null;
-        return robotToSensorView(visible[0]);
+        return mapRobotView(visible[0]);
       }
 
       case "visible_enemies": {
@@ -69,7 +95,7 @@ export function createSensorGateway(world) {
       case "nearest_ally": {
         const allies = getVisibleAllies(world, robot);
         if (allies.length === 0) return null;
-        return robotToSensorView(allies[0]);
+        return mapRobotView(allies[0]);
       }
 
       case "visible_allies": {
@@ -165,6 +191,36 @@ export function createSensorGateway(world) {
       case "current_tick":
         return world.currentTick;
 
+      case "scan": {
+        const range = Math.max(0, Math.min(args[0] ?? ACTIVE_SCAN_RANGE, ACTIVE_SCAN_RANGE));
+        const detected = scanEnemies(robot, range);
+        return detected[0] ?? null;
+      }
+
+      case "scan_enemies": {
+        const range = Math.max(0, Math.min(args[0] ?? ACTIVE_SCAN_RANGE, ACTIVE_SCAN_RANGE));
+        return scanEnemies(robot, range);
+      }
+
+      case "last_seen_enemy": {
+        const memory = robot.memory.lastSeenEnemy;
+        if (!memory) return null;
+        const age = world.currentTick - memory.tick;
+        return {
+          id: memory.id,
+          position: { x: memory.position.x, y: memory.position.y },
+          last_seen_tick: memory.tick,
+          age,
+        };
+      }
+
+      case "has_recent_enemy_contact": {
+        const maxAge = args[0] ?? ACTIVE_SCAN_MEMORY_TICKS;
+        const memory = robot.memory.lastSeenEnemy;
+        if (!memory) return false;
+        return world.currentTick - memory.tick <= maxAge;
+      }
+
       case "can_attack": {
         const target = args[0];
         if (!target) return false;
@@ -173,14 +229,21 @@ export function createSensorGateway(world) {
         const stats = CLASS_STATS[robot.class];
         const range = stats?.attackRange ?? ATTACK_RANGE;
         let targetPos;
+        let targetId = null;
         if ("position" in target) {
           targetPos = target.position;
+          targetId = target.id ?? null;
         } else if ("x" in target && "y" in target) {
           targetPos = target;
         } else {
           return false;
         }
-        return distance(robot.position, targetPos) <= range;
+        if (distance(robot.position, targetPos) > range) return false;
+        if (targetId) {
+          const visibleIds = new Set(getVisibleEnemies(world, robot).map(enemy => enemy.id));
+          if (!visibleIds.has(targetId)) return false;
+        }
+        return true;
       }
 
       default:

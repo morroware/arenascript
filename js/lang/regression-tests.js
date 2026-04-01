@@ -6,6 +6,8 @@ import { Compiler } from "./compiler.js";
 import { compile } from "./pipeline.js";
 import { VM } from "../runtime/vm.js";
 import { runMatch } from "../engine/tick.js";
+import { World } from "../engine/world.js";
+import { resolveCombat } from "../engine/combat.js";
 
 function parseSource(source) {
   const tokens = new Lexer(source).tokenize();
@@ -356,6 +358,48 @@ on tick {
   assert.ok(totalDamage > 0, "Expected robots to navigate and engage instead of stalemating on cover");
 }
 
+function testAttackRequiresVisibility() {
+  const world = new World({
+    mode: "test",
+    arenaWidth: 100,
+    arenaHeight: 100,
+    maxTicks: 100,
+    tickRate: 30,
+    seed: 1,
+  });
+  const attacker = world.spawnRobot("A", "ranger", 0, "prog_a", { x: 10, y: 10 });
+  const defender = world.spawnRobot("D", "ranger", 1, "prog_d", { x: 95, y: 95 });
+
+  resolveCombat(world, attacker, { type: "attack", target: defender.id });
+  assert.equal(defender.health, defender.maxHealth, "Attack should fail when target is not visible");
+}
+
+function testActiveScanAndMemorySensorsCompile() {
+  const source = `robot "Scanner" version "1.0"
+state {
+  has_contact: boolean = false
+}
+on tick {
+  let ping = scan()
+  if ping != null {
+    set has_contact = true
+  } else if has_recent_enemy_contact(10) {
+    let last = last_seen_enemy()
+    if last != null {
+      move_toward last.position
+    }
+  }
+  for enemy in scan_enemies(18) {
+    if can_attack(enemy) {
+      attack enemy
+      return
+    }
+  }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -379,6 +423,8 @@ function run() {
     testSetOnNonStateVariable,
     testUnterminatedString,
     testBotsNavigateAroundCover,
+    testAttackRequiresVisibility,
+    testActiveScanAndMemorySensorsCompile,
   ];
 
   let passed = 0;

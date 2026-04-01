@@ -14,7 +14,7 @@ const BUILTIN_SENSORS = new Set([
   "nearest_cover", "nearest_resource", "nearest_control_point",
   "nearest_enemy_control_point",
   "distance_to", "line_of_sight", "current_tick",
-  "can_attack",
+  "can_attack", "scan", "scan_enemies", "last_seen_enemy", "has_recent_enemy_contact",
 ]);
 
 const VALID_ACTIONS = new Set([
