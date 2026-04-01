@@ -49,6 +49,39 @@ export function createSensorGateway(world) {
     if (!robot || !robot.alive) return null;
 
     switch (sensorName) {
+      case "enemy_visible":
+        return getVisibleEnemies(world, robot).length > 0;
+
+      case "random": {
+        const min = Number(args[0] ?? 0);
+        const max = Number(args[1] ?? 100);
+        const low = Math.min(min, max);
+        const high = Math.max(min, max);
+        return Math.floor(world.rng.nextFloat(low, high + 1));
+      }
+
+      case "damage_percent":
+        return Math.round(((robot.maxHealth - robot.health) / robot.maxHealth) * 100);
+
+      case "wall_ahead": {
+        const lookahead = Math.max(0, Number(args[0] ?? 3));
+        const p = {
+          x: robot.position.x + (robot.heading.x * lookahead),
+          y: robot.position.y + (robot.heading.y * lookahead),
+        };
+        if (p.x <= 0 || p.x >= world.config.arenaWidth || p.y <= 0 || p.y >= world.config.arenaHeight) {
+          return true;
+        }
+        for (const cover of world.covers.values()) {
+          const halfW = cover.width / 2;
+          const halfH = cover.height / 2;
+          const inX = p.x >= cover.position.x - halfW && p.x <= cover.position.x + halfW;
+          const inY = p.y >= cover.position.y - halfH && p.y <= cover.position.y + halfH;
+          if (inX && inY) return true;
+        }
+        return false;
+      }
+
       // --- Self Sensors ---
       case "health":
         return robot.health;

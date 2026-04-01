@@ -7,7 +7,7 @@ import { VM } from "../runtime/vm.js";
 import { createSensorGateway } from "./sensors.js";
 import { validateAction, categorizeActions } from "./actions.js";
 import { resolveMovement, applyMovement, resolveCollisions } from "./movement.js";
-import { resolveCombat, updateProjectiles, updateCooldowns } from "./combat.js";
+import { resolveCombat, updateProjectiles, updateCooldowns, applyDamage } from "./combat.js";
 import { VisibilityTracker, checkCooldownReady } from "./events.js";
 import { ReplayWriter } from "./replay.js";
 import { CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS } from "../shared/config.js";
@@ -82,12 +82,22 @@ export function runMatch(setup) {
   // Main tick loop
   let winner = null;
   let reason = "max_ticks_reached";
+  const suddenDeathStartTick = config.maxTicks;
+  const suddenDeathMaxTicks = config.suddenDeathMaxTicks ?? 900;
+  const absoluteMaxTicks = suddenDeathStartTick + suddenDeathMaxTicks;
 
-  for (let tick = 0; tick < config.maxTicks; tick++) {
+  for (let tick = 0; tick < absoluteMaxTicks; tick++) {
     world.currentTick = tick;
+    const inSuddenDeath = tick >= suddenDeathStartTick;
 
     // Phase 1: Update world timers/cooldowns
     updateCooldowns(world);
+
+    if (inSuddenDeath) {
+      for (const robot of world.getAliveRobots()) {
+        applyDamage(world, robot, 1, "sudden_death");
+      }
+    }
 
     // Phase 2: Build sensor views (handled lazily by sensor gateway)
     // Phase 3 & 4: Execute robot programs and collect action intents
@@ -214,7 +224,9 @@ export function runMatch(setup) {
     const winResult = checkWinCondition(world);
     if (winResult.resolved) {
       winner = winResult.winner;
-      reason = winResult.reason;
+      reason = inSuddenDeath && winResult.reason === "elimination"
+        ? "sudden_death_elimination"
+        : winResult.reason;
       break;
     }
   }

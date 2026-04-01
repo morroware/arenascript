@@ -9,6 +9,7 @@ const ACTION_KEYWORDS = new Set([
   "move_to", "move_toward", "strafe_left", "strafe_right", "stop",
   "attack", "fire_at", "use_ability", "shield", "retreat",
   "mark_target", "capture", "ping",
+  "move_forward", "move_backward", "turn_left", "turn_right",
 ]);
 
 export class ParseError extends Error {

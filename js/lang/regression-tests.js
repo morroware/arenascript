@@ -400,6 +400,73 @@ on tick {
   assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
 }
 
+function testTacticalParityPrimitivesCompileAndRun() {
+  const source = `robot "ParityBot" version "1.0"
+state {
+  should_retreat: boolean = false
+}
+on tick {
+  if enemy_visible() {
+    let enemy = nearest_enemy()
+    if can_attack(enemy) {
+      attack enemy
+    } else {
+      fire_at enemy.position
+      move_forward
+    }
+  } else {
+    if wall_ahead(3) {
+      turn_right
+    } else if random(0, 100) > 50 {
+      turn_left
+      move_forward
+    } else {
+      move_forward
+    }
+  }
+
+  if damage_percent() > 60 {
+    set should_retreat = true
+    move_backward
+  }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+
+  const baseline = compile(`robot "Baseline" version "1.0"
+on tick {
+  let enemy = nearest_enemy()
+  if enemy != null {
+    if can_attack(enemy) {
+      attack enemy
+    } else {
+      move_toward enemy.position
+    }
+  } else {
+    move_to nearest_enemy_control_point()
+  }
+}`);
+  assert.ok(baseline.success, `Compile failed: ${baseline.errors.join(", ")}`);
+
+  const match = runMatch({
+    config: {
+      mode: "1v1_ranked",
+      arenaWidth: 100,
+      arenaHeight: 100,
+      maxTicks: 600,
+      tickRate: 30,
+      seed: 9,
+    },
+    participants: [
+      { program: result.program, constants: result.constants, playerId: "parity", teamId: 0 },
+      { program: baseline.program, constants: baseline.constants, playerId: "base", teamId: 1 },
+    ],
+  });
+
+  const totalActions = [...match.robotStats.values()].reduce((n, s) => n + s.actionsExecuted, 0);
+  assert.ok(totalActions > 0, "Expected parity bot primitives to execute runtime actions");
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -425,6 +492,7 @@ function run() {
     testBotsNavigateAroundCover,
     testAttackRequiresVisibility,
     testActiveScanAndMemorySensorsCompile,
+    testTacticalParityPrimitivesCompileAndRun,
   ];
 
   let passed = 0;

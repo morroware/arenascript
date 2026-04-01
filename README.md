@@ -156,8 +156,8 @@ on damaged(event) {
 | **Control Flow** | `if`/`else`, `for`...`in` loops, `return` |
 | **Operators** | `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `not` |
 | **Events** | `on spawn`, `on tick`, `on damaged`, `on low_health` |
-| **Commands** | `attack`, `move_toward`, `move_to`, `retreat`, `shield`, `dash` |
-| **Sensors** | `nearest_enemy()`, `scan()`, `scan_enemies()`, `last_seen_enemy()`, `nearest_ally()`, `nearest_control_point()`, `health()`, `energy()`, `can_attack()` |
+| **Commands** | `attack`, `fire_at`, `move_toward`, `move_to`, `move_forward`, `turn_left`, `retreat`, `shield` |
+| **Sensors** | `nearest_enemy()`, `scan()`, `scan_enemies()`, `enemy_visible()`, `wall_ahead()`, `random()`, `last_seen_enemy()`, `health()`, `energy()`, `can_attack()` |
 | **Functions** | `fn name(params) { ... }` for custom functions |
 
 ### Robot Classes

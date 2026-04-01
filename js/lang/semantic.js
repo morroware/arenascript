@@ -15,12 +15,14 @@ const BUILTIN_SENSORS = new Set([
   "nearest_enemy_control_point",
   "distance_to", "line_of_sight", "current_tick",
   "can_attack", "scan", "scan_enemies", "last_seen_enemy", "has_recent_enemy_contact",
+  "enemy_visible", "random", "wall_ahead", "damage_percent",
 ]);
 
 const VALID_ACTIONS = new Set([
   "move_to", "move_toward", "strafe_left", "strafe_right", "stop",
   "attack", "fire_at", "use_ability", "shield", "retreat",
   "mark_target", "capture", "ping",
+  "move_forward", "move_backward", "turn_left", "turn_right",
 ]);
 
 const VALID_TYPES = new Set([
