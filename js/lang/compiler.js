@@ -105,7 +105,17 @@ export class Compiler {
   #userFunctionNames = new Set();
   #pendingCalls = [];
 
+  #reset() {
+    this.#stateSlots = [];
+    this.#stateIndexMap = new Map();
+    this.#constMap = new Map();
+    this.#functionOffsets = new Map();
+    this.#userFunctionNames = new Set();
+    this.#pendingCalls = [];
+  }
+
   compile(program) {
+    this.#reset();
     const builder = new ChunkBuilder();
 
     // Register state slots
