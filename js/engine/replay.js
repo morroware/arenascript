@@ -18,7 +18,7 @@ export class ReplayWriter {
   }
 
   /** Capture the current world state as a replay frame */
-  captureFrame(world, events, actions) {
+  captureFrame(world, events, actions, decisionTraces) {
     const robots = [...world.robots.values()].map(r => ({
       id: r.id,
       teamId: r.teamId,
@@ -51,7 +51,7 @@ export class ReplayWriter {
       destructible: c.destructible, health: c.health,
     }));
 
-    this.#frames.push({
+    const frame = {
       tick: world.currentTick,
       robots,
       projectiles,
@@ -59,7 +59,18 @@ export class ReplayWriter {
       pickups,
       covers,
       events: [...events],
-    });
+    };
+
+    if (decisionTraces) {
+      frame.traces = [...decisionTraces.entries()].map(([robotId, trace]) => ({
+        robotId,
+        event: trace.event,
+        action: trace.action,
+        budgetUsed: trace.budgetUsed,
+      }));
+    }
+
+    this.#frames.push(frame);
   }
 
   /** Store arena layout for rendering */
@@ -95,6 +106,64 @@ export class ReplayWriter {
       frames: this.#frames,
     };
   }
+}
+
+/** Scan replay frames and return bookmark indices for key match events */
+export function computeBookmarks(frames) {
+  const bookmarks = {
+    firstDamage: null,
+    firstKill: null,
+    captureStart: null,
+    captureEnd: null,
+    lowHealthMoments: [],
+  };
+
+  // Track previous health per robot and whether low-health was already recorded
+  const prevHealth = new Map();
+  const lowHealthSeen = new Set();
+
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i];
+
+    // Check robots for damage, kills, and low-health moments
+    for (const robot of frame.robots) {
+      const prev = prevHealth.get(robot.id);
+
+      if (prev !== undefined && robot.health < prev) {
+        // Damage detected
+        if (bookmarks.firstDamage === null) {
+          bookmarks.firstDamage = i;
+        }
+        // Kill detected
+        if (robot.health <= 0 && bookmarks.firstKill === null) {
+          bookmarks.firstKill = i;
+        }
+      }
+
+      // Low health moment (first time this robot drops below 25 HP)
+      if (robot.health > 0 && robot.health < 25 && !lowHealthSeen.has(robot.id)) {
+        lowHealthSeen.add(robot.id);
+        bookmarks.lowHealthMoments.push({ frameIndex: i, robotId: robot.id });
+      }
+
+      prevHealth.set(robot.id, robot.health);
+    }
+
+    // Check events for capture-related entries
+    const hasCaptureEvent = frame.events && frame.events.some(
+      e => typeof e === "string" ? e.toLowerCase().includes("capture")
+        : e && typeof e.type === "string" && e.type.toLowerCase().includes("capture")
+    );
+
+    if (hasCaptureEvent) {
+      if (bookmarks.captureStart === null) {
+        bookmarks.captureStart = i;
+      }
+      bookmarks.captureEnd = i;
+    }
+  }
+
+  return bookmarks;
 }
 
 /** Validate replay integrity — same seed + programs should produce identical frames */

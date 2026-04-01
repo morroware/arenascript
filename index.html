@@ -98,6 +98,11 @@
       </div>
 
       <div class="sidebar-section">
+        <label for="seed-input">Seed (blank = random)</label>
+        <input id="seed-input" type="number" class="opponent-select" placeholder="Random" min="0" max="2147483646">
+      </div>
+
+      <div class="sidebar-section">
         <label for="team-preset-select">Team Simulation</label>
         <select id="team-preset-select" class="opponent-select">
           <option value="skirmish_pair">Skirmish Pair</option>
@@ -158,6 +163,8 @@
             <button id="btn-replay-step" class="replay-btn step-btn" title="Step Forward">&#9654;&#9654;</button>
             <input id="replay-scrubber" class="replay-scrubber" type="range" min="0" max="100" value="0">
             <span id="replay-tick-label" class="replay-tick-label">0 / 0</span>
+            <button id="btn-bookmark-damage" class="replay-btn bookmark-btn" title="Jump to first damage">1st Dmg</button>
+            <button id="btn-bookmark-kill" class="replay-btn bookmark-btn" title="Jump to first kill">1st Kill</button>
             <label class="speed-label">
               Speed
               <select id="replay-speed" class="replay-speed-select">

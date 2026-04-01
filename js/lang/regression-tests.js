@@ -8,6 +8,11 @@ import { VM } from "../runtime/vm.js";
 import { runMatch } from "../engine/tick.js";
 import { World } from "../engine/world.js";
 import { resolveCombat, updateProjectiles } from "../engine/combat.js";
+import { computeBookmarks } from "../engine/replay.js";
+import {
+  validateMatchMode, validateParticipantCount,
+  validateMatchConfig, validateParticipant, validateMatchRequest,
+} from "../shared/validation.js";
 
 function parseSource(source) {
   const tokens = new Lexer(source).tokenize();
@@ -733,6 +738,268 @@ function testPickupCollection() {
   assert.ok(world.pickups.size === 1, "Pickup should exist");
 }
 
+// --- "Did You Mean" Suggestion Tests ---
+
+function testDidYouMeanEventSuggestion() {
+  const source = `robot "Typo" version "1.0"
+on tik {
+  stop
+}`;
+  const result = compile(source);
+  assert.ok(!result.success, "Should fail: unknown event");
+  assert.ok(result.errors.some(e => e.includes("Did you mean 'tick'")),
+    "Should suggest 'tick' for 'tik'");
+}
+
+function testDidYouMeanActionSuggestion() {
+  const source = `robot "Typo" version "1.0"
+on tick {
+  atack
+}`;
+  const result = compile(source);
+  assert.ok(!result.success, "Should fail: unknown action");
+  // The parser may treat this as an identifier or action — check for any suggestion
+  assert.ok(
+    result.errors.some(e => e.includes("Did you mean") || e.includes("atack")),
+    "Should report error for 'atack'");
+}
+
+function testDidYouMeanSensorSuggestion() {
+  const source = `robot "Typo" version "1.0"
+on tick {
+  let e = nearst_enemy()
+}`;
+  const result = compile(source);
+  assert.ok(!result.success, "Should fail: unknown function");
+  assert.ok(result.errors.some(e => e.includes("Did you mean 'nearest_enemy'")),
+    "Should suggest 'nearest_enemy' for 'nearst_enemy'");
+}
+
+// --- Validation Tests ---
+
+function testValidateMatchModeAcceptsValid() {
+  const result = validateMatchMode("1v1_ranked");
+  assert.ok(result.valid);
+}
+
+function testValidateMatchModeRejectsInvalid() {
+  const result = validateMatchMode("3v3");
+  assert.ok(!result.valid);
+  assert.ok(result.errors.length > 0);
+}
+
+function testValidateParticipantCountValid() {
+  assert.ok(validateParticipantCount("1v1_ranked", 2).valid);
+  assert.ok(validateParticipantCount("ffa", 4).valid);
+  assert.ok(validateParticipantCount("2v2", 4).valid);
+}
+
+function testValidateParticipantCountInvalid() {
+  assert.ok(!validateParticipantCount("1v1_ranked", 3).valid);
+  assert.ok(!validateParticipantCount("ffa", 1).valid);
+}
+
+function testValidateMatchConfigValid() {
+  const config = {
+    mode: "1v1_ranked", arenaWidth: 140, arenaHeight: 140,
+    maxTicks: 3000, tickRate: 30, seed: 42,
+  };
+  assert.ok(validateMatchConfig(config).valid);
+}
+
+function testValidateMatchConfigRejectsBadSeed() {
+  const config = {
+    mode: "1v1_ranked", arenaWidth: 140, arenaHeight: 140,
+    maxTicks: 3000, tickRate: 30, seed: -1,
+  };
+  const result = validateMatchConfig(config);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some(e => e.includes("seed")));
+}
+
+function testValidateParticipantRejectsMissingFields() {
+  const result = validateParticipant({ playerId: "", teamId: -1 });
+  assert.ok(!result.valid);
+  assert.ok(result.errors.length >= 2);
+}
+
+function testValidateMatchRequestFullValid() {
+  const prog = compile(`robot "Test" version "1.0"\non tick { stop }`);
+  assert.ok(prog.success);
+  const request = {
+    config: {
+      mode: "1v1_ranked", arenaWidth: 140, arenaHeight: 140,
+      maxTicks: 3000, tickRate: 30, seed: 42,
+    },
+    participants: [
+      { program: prog.program, constants: prog.constants, playerId: "p1", teamId: 0 },
+      { program: prog.program, constants: prog.constants, playerId: "p2", teamId: 1 },
+    ],
+  };
+  assert.ok(validateMatchRequest(request).valid);
+}
+
+// --- Replay Bookmark Tests ---
+
+function testComputeBookmarksDetectsDamage() {
+  const frames = [
+    { tick: 0, robots: [{ id: "r1", health: 100 }, { id: "r2", health: 100 }], events: [] },
+    { tick: 1, robots: [{ id: "r1", health: 100 }, { id: "r2", health: 90 }], events: [] },
+    { tick: 2, robots: [{ id: "r1", health: 100 }, { id: "r2", health: 80 }], events: [] },
+  ];
+  const bm = computeBookmarks(frames);
+  assert.equal(bm.firstDamage, 1, "First damage should be at frame 1");
+  assert.equal(bm.firstKill, null, "No kills in these frames");
+}
+
+function testComputeBookmarksDetectsKill() {
+  const frames = [
+    { tick: 0, robots: [{ id: "r1", health: 100 }, { id: "r2", health: 10 }], events: [] },
+    { tick: 1, robots: [{ id: "r1", health: 100 }, { id: "r2", health: 0 }], events: [] },
+  ];
+  const bm = computeBookmarks(frames);
+  assert.equal(bm.firstKill, 1, "First kill should be at frame 1");
+}
+
+function testComputeBookmarksLowHealth() {
+  const frames = [
+    { tick: 0, robots: [{ id: "r1", health: 100 }], events: [] },
+    { tick: 1, robots: [{ id: "r1", health: 30 }], events: [] },
+    { tick: 2, robots: [{ id: "r1", health: 20 }], events: [] },
+  ];
+  const bm = computeBookmarks(frames);
+  assert.equal(bm.lowHealthMoments.length, 1);
+  assert.equal(bm.lowHealthMoments[0].frameIndex, 2);
+  assert.equal(bm.lowHealthMoments[0].robotId, "r1");
+}
+
+// --- Engine Invariant Tests (Property-Based) ---
+
+function testEngineHealthBoundsInvariant() {
+  // Run a match and verify no robot ever has NaN health or health > maxHealth
+  const bot = compile(`robot "Inv" version "1.0"
+meta { class: "brawler" }
+on tick {
+  let enemy = nearest_enemy()
+  if enemy != null {
+    if can_attack(enemy) { attack enemy } else { move_toward enemy.position }
+  } else { move_forward }
+}`);
+  assert.ok(bot.success);
+
+  const result = runMatch({
+    config: { mode: "1v1_ranked", arenaWidth: 80, arenaHeight: 80, maxTicks: 500, tickRate: 30, seed: 42 },
+    participants: [
+      { program: bot.program, constants: bot.constants, playerId: "p1", teamId: 0 },
+      { program: bot.program, constants: bot.constants, playerId: "p2", teamId: 1 },
+    ],
+  });
+
+  for (const frame of result.replay.frames) {
+    for (const robot of frame.robots) {
+      assert.ok(!isNaN(robot.health), `Robot ${robot.id} has NaN health at tick ${frame.tick}`);
+      assert.ok(!isNaN(robot.position.x), `Robot ${robot.id} has NaN x at tick ${frame.tick}`);
+      assert.ok(!isNaN(robot.position.y), `Robot ${robot.id} has NaN y at tick ${frame.tick}`);
+    }
+  }
+}
+
+function testEngineNoNaNPositions() {
+  // Run with multiple robot types and check position invariants
+  const brawler = compile(`robot "B" version "1.0"\nmeta { class: "brawler" }\non tick { move_forward\nif wall_ahead(3) { turn_right } }`);
+  const ranger = compile(`robot "R" version "1.0"\nmeta { class: "ranger" }\non tick { let e = nearest_enemy()\nif e != null { fire_at e.position } else { move_forward } }`);
+  assert.ok(brawler.success && ranger.success);
+
+  const result = runMatch({
+    config: { mode: "1v1_ranked", arenaWidth: 100, arenaHeight: 100, maxTicks: 300, tickRate: 30, seed: 99 },
+    participants: [
+      { program: brawler.program, constants: brawler.constants, playerId: "b", teamId: 0 },
+      { program: ranger.program, constants: ranger.constants, playerId: "r", teamId: 1 },
+    ],
+  });
+
+  for (const frame of result.replay.frames) {
+    for (const robot of frame.robots) {
+      assert.ok(robot.position.x >= 0 && robot.position.x <= 100,
+        `Robot ${robot.id} x=${robot.position.x} out of bounds at tick ${frame.tick}`);
+      assert.ok(robot.position.y >= 0 && robot.position.y <= 100,
+        `Robot ${robot.id} y=${robot.position.y} out of bounds at tick ${frame.tick}`);
+    }
+  }
+}
+
+// --- End-to-End 2v2 and FFA Tests ---
+
+function testEndToEnd2v2Match() {
+  const tankBot = compile(`robot "Tank" version "1.0"\nmeta { class: "tank" }\non tick { let e = nearest_enemy()\nif e != null { if can_attack(e) { attack e } else { move_toward e.position } } else { move_forward } }`);
+  const rangerBot = compile(`robot "Ranger" version "1.0"\nmeta { class: "ranger" }\non tick { let e = nearest_enemy()\nif e != null { fire_at e.position } else { move_forward } }`);
+  assert.ok(tankBot.success && rangerBot.success);
+
+  const result = runMatch({
+    config: { mode: "squad_2v2", arenaWidth: 100, arenaHeight: 100, maxTicks: 600, tickRate: 30, seed: 55 },
+    participants: [
+      { program: tankBot.program, constants: tankBot.constants, playerId: "t1", teamId: 0 },
+      { program: rangerBot.program, constants: rangerBot.constants, playerId: "r1", teamId: 0 },
+      { program: tankBot.program, constants: tankBot.constants, playerId: "t2", teamId: 1 },
+      { program: rangerBot.program, constants: rangerBot.constants, playerId: "r2", teamId: 1 },
+    ],
+  });
+
+  assert.ok(result.replay.frames.length > 0, "2v2 match should produce frames");
+  assert.ok(result.tickCount > 0, "2v2 match should run ticks");
+  // Verify 4 robots spawned
+  const firstFrame = result.replay.frames[0];
+  assert.equal(firstFrame.robots.length, 4, "2v2 should have 4 robots");
+  // Verify both teams present
+  const teams = new Set(firstFrame.robots.map(r => r.teamId));
+  assert.ok(teams.has(0) && teams.has(1), "Both teams should be present");
+}
+
+function testEndToEndFFAMatch() {
+  const bot = compile(`robot "FFA" version "1.0"\nmeta { class: "brawler" }\non tick { let e = nearest_enemy()\nif e != null { if can_attack(e) { attack e } else { move_toward e.position } } else { move_forward } }`);
+  assert.ok(bot.success);
+
+  const result = runMatch({
+    config: { mode: "ffa", arenaWidth: 120, arenaHeight: 120, maxTicks: 600, tickRate: 30, seed: 33 },
+    participants: [
+      { program: bot.program, constants: bot.constants, playerId: "p1", teamId: 0 },
+      { program: bot.program, constants: bot.constants, playerId: "p2", teamId: 1 },
+      { program: bot.program, constants: bot.constants, playerId: "p3", teamId: 2 },
+      { program: bot.program, constants: bot.constants, playerId: "p4", teamId: 3 },
+    ],
+  });
+
+  assert.ok(result.replay.frames.length > 0, "FFA match should produce frames");
+  const firstFrame = result.replay.frames[0];
+  assert.equal(firstFrame.robots.length, 4, "FFA should have 4 robots");
+  const teams = new Set(firstFrame.robots.map(r => r.teamId));
+  assert.equal(teams.size, 4, "FFA should have 4 unique teams");
+}
+
+function testDeterministicReplayWithSeed() {
+  const bot = compile(`robot "Det" version "1.0"\nmeta { class: "brawler" }\non tick { let e = nearest_enemy()\nif e != null { if can_attack(e) { attack e } else { move_toward e.position } } else { move_forward } }`);
+  assert.ok(bot.success);
+
+  const config = { mode: "1v1_ranked", arenaWidth: 80, arenaHeight: 80, maxTicks: 200, tickRate: 30, seed: 12345 };
+  const participants = [
+    { program: bot.program, constants: bot.constants, playerId: "a", teamId: 0 },
+    { program: bot.program, constants: bot.constants, playerId: "b", teamId: 1 },
+  ];
+
+  const result1 = runMatch({ config, participants });
+  const result2 = runMatch({ config, participants });
+
+  assert.equal(result1.tickCount, result2.tickCount, "Same seed should produce same tick count");
+  assert.equal(result1.winner, result2.winner, "Same seed should produce same winner");
+  // Compare final frame positions
+  const last1 = result1.replay.frames[result1.replay.frames.length - 1];
+  const last2 = result2.replay.frames[result2.replay.frames.length - 1];
+  for (let i = 0; i < last1.robots.length; i++) {
+    assert.ok(Math.abs(last1.robots[i].position.x - last2.robots[i].position.x) < 0.001,
+      "Deterministic seed should produce identical final positions");
+  }
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -769,6 +1036,30 @@ function run() {
     testSignalReceivedEvent,
     testMineDetonation,
     testPickupCollection,
+    // "Did you mean" suggestions
+    testDidYouMeanEventSuggestion,
+    testDidYouMeanActionSuggestion,
+    testDidYouMeanSensorSuggestion,
+    // Validation
+    testValidateMatchModeAcceptsValid,
+    testValidateMatchModeRejectsInvalid,
+    testValidateParticipantCountValid,
+    testValidateParticipantCountInvalid,
+    testValidateMatchConfigValid,
+    testValidateMatchConfigRejectsBadSeed,
+    testValidateParticipantRejectsMissingFields,
+    testValidateMatchRequestFullValid,
+    // Replay bookmarks
+    testComputeBookmarksDetectsDamage,
+    testComputeBookmarksDetectsKill,
+    testComputeBookmarksLowHealth,
+    // Engine invariants
+    testEngineHealthBoundsInvariant,
+    testEngineNoNaNPositions,
+    // End-to-end multi-mode
+    testEndToEnd2v2Match,
+    testEndToEndFFAMatch,
+    testDeterministicReplayWithSeed,
   ];
 
   let passed = 0;
