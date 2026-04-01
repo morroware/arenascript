@@ -37,6 +37,10 @@ export class SemanticAnalyzer {
 
   analyze(program) {
     this.#diagnostics = [];
+    this.#constants = new Set();
+    this.#stateVars = new Set();
+    this.#functions = new Map();
+    this.#localScopes = [];
 
     // Validate robot declaration
     if (!program.robot.name || program.robot.name.trim() === "") {
@@ -104,7 +108,7 @@ export class SemanticAnalyzer {
       // Validate handler body
       this.#pushScope();
       if (handler.param) {
-        this.#addLocal(handler.param);
+        this.#addLocal(handler.param, handler.span);
       }
       this.#validateStatements(handler.body);
       this.#popScope();
@@ -115,7 +119,7 @@ export class SemanticAnalyzer {
       this.#pushScope();
       for (const param of fn.params) {
         this.#validateType(param.type);
-        this.#addLocal(param.name);
+        this.#addLocal(param.name, param.type?.span ?? fn.span);
       }
       if (fn.returnType) {
         this.#validateType(fn.returnType);
@@ -142,7 +146,7 @@ export class SemanticAnalyzer {
     switch (stmt.kind) {
       case "LetStatement":
         this.#validateExpression(stmt.value);
-        this.#addLocal(stmt.name);
+        this.#addLocal(stmt.name, stmt.span);
         break;
 
       case "SetStatement":
@@ -173,7 +177,7 @@ export class SemanticAnalyzer {
       case "ForStatement":
         this.#validateExpression(stmt.iterable);
         this.#pushScope();
-        this.#addLocal(stmt.variable);
+        this.#addLocal(stmt.variable, stmt.span);
         this.#validateStatements(stmt.body);
         this.#popScope();
         break;
@@ -279,9 +283,13 @@ export class SemanticAnalyzer {
     this.#localScopes.pop();
   }
 
-  #addLocal(name) {
+  #addLocal(name, span = null) {
     if (this.#localScopes.length > 0) {
-      this.#localScopes[this.#localScopes.length - 1].add(name);
+      const scope = this.#localScopes[this.#localScopes.length - 1];
+      if (scope.has(name) && span) {
+        this.#addWarning(`Local '${name}' shadows an existing local in the same scope`, span.line, span.column);
+      }
+      scope.add(name);
     }
   }
 

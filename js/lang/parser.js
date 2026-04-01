@@ -35,18 +35,33 @@ export class Parser {
     let state;
     const handlers = [];
     const functions = [];
+    let seenMeta = false;
+    let seenConst = false;
+    let seenState = false;
 
     while (!this.#isAtEnd()) {
       const token = this.#current();
       switch (token.type) {
         case TokenType.Meta:
+          if (seenMeta) {
+            throw this.#error("Duplicate meta block");
+          }
           meta = this.#parseMetaBlock();
+          seenMeta = true;
           break;
         case TokenType.Const:
+          if (seenConst) {
+            throw this.#error("Duplicate const block");
+          }
           constants = this.#parseConstBlock();
+          seenConst = true;
           break;
         case TokenType.State:
+          if (seenState) {
+            throw this.#error("Duplicate state block");
+          }
           state = this.#parseStateBlock();
+          seenState = true;
           break;
         case TokenType.On:
           handlers.push(this.#parseEventHandler());

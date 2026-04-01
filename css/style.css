@@ -257,6 +257,29 @@ body {
   background: var(--accent-green);
 }
 
+
+.editor-toolbar .diagnostic-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  font-family: var(--font-mono);
+}
+
+.editor-toolbar .diagnostic-summary.has-errors {
+  color: var(--accent-red);
+  border-color: rgba(255, 51, 85, 0.35);
+  background: rgba(255, 51, 85, 0.08);
+}
+
+.editor-toolbar .diagnostic-summary.has-warnings {
+  color: var(--accent-orange);
+  border-color: rgba(255, 136, 0, 0.35);
+  background: rgba(255, 136, 0, 0.08);
+}
+
 /* ---- Buttons ---- */
 
 .btn {
@@ -451,8 +474,18 @@ body {
 
 .error-bar .error-line-num {
   color: var(--accent-red);
-  opacity: 0.6;
+  opacity: 0.85;
   margin-right: 8px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.error-bar .error-line-num:hover {
+  opacity: 1;
 }
 
 /* ---- Arena Pane ---- */

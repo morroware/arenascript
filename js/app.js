@@ -182,6 +182,7 @@ const btnCompile = document.getElementById("btn-compile");
 const btnRun = document.getElementById("btn-run");
 const btnCompileRun = document.getElementById("btn-compile-run");
 const btnClear = document.getElementById("btn-clear");
+const diagnosticSummaryEl = document.getElementById("diagnostic-summary");
 const consoleEl = document.getElementById("console-output");
 const canvasEl = document.getElementById("arena-canvas");
 const arenaStatus = document.getElementById("arena-status");
@@ -360,6 +361,42 @@ function syncScroll() {
 // Error Display
 // ============================================================================
 
+function updateDiagnosticSummary(errors = [], warnings = []) {
+  if (!diagnosticSummaryEl) return;
+  const errCount = errors.length;
+  const warnCount = warnings.length;
+
+  if (errCount === 0 && warnCount === 0) {
+    diagnosticSummaryEl.textContent = "No diagnostics";
+    diagnosticSummaryEl.className = "diagnostic-summary";
+    return;
+  }
+
+  const parts = [];
+  if (errCount > 0) parts.push(`${errCount} error${errCount === 1 ? "" : "s"}`);
+  if (warnCount > 0) parts.push(`${warnCount} warning${warnCount === 1 ? "" : "s"}`);
+  diagnosticSummaryEl.textContent = parts.join(" • ");
+  diagnosticSummaryEl.className = `diagnostic-summary ${errCount > 0 ? "has-errors" : "has-warnings"}`;
+}
+
+function jumpToLine(line) {
+  if (!line || line < 1) return;
+  const lines = editorEl.value.split("\n");
+  let cursor = 0;
+  const target = Math.min(line, lines.length);
+  for (let i = 1; i < target; i++) {
+    cursor += lines[i - 1].length + 1;
+  }
+
+  editorEl.focus();
+  editorEl.setSelectionRange(cursor, cursor);
+
+  const lineHeight = parseFloat(getComputedStyle(editorEl).lineHeight) || 20;
+  const topPad = parseFloat(getComputedStyle(editorEl).paddingTop) || 0;
+  editorEl.scrollTop = Math.max(0, (target - 1) * lineHeight - topPad - lineHeight * 2);
+  syncScroll();
+}
+
 function showErrors(errors) {
   if (!errors || errors.length === 0) {
     errorBarEl.classList.remove("visible");
@@ -370,15 +407,23 @@ function showErrors(errors) {
   lastCompileErrors = errors;
   errorBarEl.classList.add("visible");
   errorBarEl.innerHTML = errors.map(e => {
-    const lineNum = e.line ? `<span class="error-line-num">Ln ${e.line}</span>` : "";
+    const lineNum = e.line ? `<button type="button" class="error-line-num" data-line="${e.line}">Ln ${e.line}</button>` : "";
     return `<div class="error-line-entry">${lineNum}${escapeHtml(e.message || e)}</div>`;
   }).join("");
+
+  errorBarEl.querySelectorAll(".error-line-num[data-line]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const line = Number.parseInt(el.getAttribute("data-line"), 10);
+      jumpToLine(line);
+    });
+  });
   updateLineNumbers();
 }
 
 function clearErrors() {
   showErrors([]);
   updateLineNumbers();
+  updateDiagnosticSummary([], []);
 }
 
 // ============================================================================
@@ -420,12 +465,14 @@ function doCompile() {
 
       logToConsole(`Compiled OK  |  ${result.program.robotClass}  |  ${result.program.bytecode.length} bytes  |  events: ${[...result.program.eventHandlers.keys()].join(", ")}`, "success");
 
+      const warnings = result.diagnostics.filter(d => d.severity === "warning");
+      updateDiagnosticSummary([], warnings);
+
       if (result.diagnostics.length > 0) {
         for (const d of result.diagnostics) {
           const t = d.severity === "error" ? "error" : "warn";
           logToConsole(`  ${d.severity.toUpperCase()}: ${d.message}`, t);
         }
-        const warnings = result.diagnostics.filter(d => d.severity === "warning");
         if (warnings.length > 0) {
           showErrors(warnings.map(d => ({ line: d.line, message: `Warning: ${d.message}` })));
         }
@@ -439,6 +486,8 @@ function doCompile() {
 
       const allDiag = result.diagnostics || [];
       const errorDiag = allDiag.filter(d => d.severity === "error");
+      const warningDiag = allDiag.filter(d => d.severity === "warning");
+      updateDiagnosticSummary(errorDiag, warningDiag);
 
       for (const err of result.errors) {
         logToConsole(`  ${err}`, "error");
@@ -462,6 +511,7 @@ function doCompile() {
     btnRun.disabled = true;
     logToConsole(`[EXCEPTION] ${e.message}`, "error");
     showErrors([{ line: 0, message: e.message }]);
+    updateDiagnosticSummary([{ line: 0, message: e.message }], []);
     return false;
   }
 }
