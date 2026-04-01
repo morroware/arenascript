@@ -4,8 +4,8 @@
 export const ENGINE_VERSION = "0.1.0";
 export const LANGUAGE_VERSION = "1.0";
 // --- Arena ---
-export const ARENA_WIDTH = 100;
-export const ARENA_HEIGHT = 100;
+export const ARENA_WIDTH = 140;
+export const ARENA_HEIGHT = 140;
 // --- Tick ---
 export const TICK_RATE = 30; // ticks per second
 export const MAX_TICKS = 3000; // 100 seconds
@@ -22,6 +22,13 @@ export const ATTACK_ENERGY_COST = 10;
 export const FIRE_AT_DAMAGE = 8;
 export const FIRE_AT_RANGE = 15.0;
 export const FIRE_AT_COOLDOWN = 8;
+export const BURST_FIRE_DAMAGE = 5;
+export const BURST_FIRE_RANGE = 12.0;
+export const BURST_FIRE_COOLDOWN = 10;
+export const GRENADE_DAMAGE = 16;
+export const GRENADE_RADIUS = 3.5;
+export const GRENADE_RANGE = 16.0;
+export const GRENADE_COOLDOWN = 18;
 export const PROJECTILE_SPEED = 4.0;
 export const PROJECTILE_TTL = 20; // ticks
 // --- Perception ---
@@ -44,6 +51,8 @@ export const BUDGET_MEMORY_OPS = 200;
 export const CAPTURE_RATE = 0.02; // per tick while in range
 export const CAPTURE_RADIUS = 3.0;
 export const CAPTURE_WIN_THRESHOLD = 1.0;
+export const HEAL_ZONE_RADIUS = 4.0;
+export const HEAL_ZONE_TICK_RATE = 2;
 // --- Ranked ---
 export const INITIAL_ELO = 1000;
 export const ELO_K_FACTOR = 32;

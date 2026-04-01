@@ -8,6 +8,7 @@ import { TokenType } from "./tokens.js";
 const ACTION_KEYWORDS = new Set([
   "move_to", "move_toward", "strafe_left", "strafe_right", "stop",
   "attack", "fire_at", "use_ability", "shield", "retreat",
+  "burst_fire", "grenade",
   "mark_target", "capture", "ping",
   "move_forward", "move_backward", "turn_left", "turn_right",
 ]);
@@ -32,11 +33,13 @@ export class Parser {
     const span = this.#currentSpan();
     const robot = this.#parseRobotDecl();
     let meta;
+    let squad;
     let constants;
     let state;
     const handlers = [];
     const functions = [];
     let seenMeta = false;
+    let seenSquad = false;
     let seenConst = false;
     let seenState = false;
 
@@ -49,6 +52,13 @@ export class Parser {
           }
           meta = this.#parseMetaBlock();
           seenMeta = true;
+          break;
+        case TokenType.Squad:
+          if (seenSquad) {
+            throw this.#error("Duplicate squad block");
+          }
+          squad = this.#parseSquadBlock();
+          seenSquad = true;
           break;
         case TokenType.Const:
           if (seenConst) {
@@ -75,7 +85,7 @@ export class Parser {
       }
     }
 
-    return { kind: "Program", robot, meta, constants, state, handlers, functions, span };
+    return { kind: "Program", robot, meta, squad, constants, state, handlers, functions, span };
   }
 
   // --- Top-Level Parsers ---
@@ -118,6 +128,35 @@ export class Parser {
     }
     this.#expect(TokenType.RightBrace);
     return { kind: "ConstBlock", entries, span };
+  }
+
+  #parseSquadBlock() {
+    const span = this.#currentSpan();
+    this.#expect(TokenType.Squad);
+    this.#expect(TokenType.LeftBrace);
+    let size;
+    let roles;
+
+    while (!this.#check(TokenType.RightBrace)) {
+      const key = this.#expect(TokenType.Identifier).value;
+      this.#expect(TokenType.Colon);
+
+      if (key === "size") {
+        size = this.#expect(TokenType.Number).value;
+      } else if (key === "roles") {
+        roles = [];
+        roles.push(this.#expect(TokenType.String).value);
+        while (this.#check(TokenType.Comma)) {
+          this.#advance();
+          roles.push(this.#expect(TokenType.String).value);
+        }
+      } else {
+        throw this.#error(`Unknown squad field '${key}'`);
+      }
+    }
+
+    this.#expect(TokenType.RightBrace);
+    return { kind: "SquadBlock", size, roles, span };
   }
 
   #parseStateBlock() {

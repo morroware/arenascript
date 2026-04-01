@@ -12,16 +12,18 @@ const BUILTIN_SENSORS = new Set([
   "nearest_enemy", "visible_enemies", "enemy_count_in_range",
   "nearest_ally", "visible_allies",
   "nearest_cover", "nearest_resource", "nearest_control_point",
-  "nearest_enemy_control_point",
+  "nearest_enemy_control_point", "nearest_heal_zone",
   "distance_to", "line_of_sight", "current_tick",
   "can_attack", "scan", "scan_enemies", "last_seen_enemy", "has_recent_enemy_contact",
   "enemy_visible", "random", "wall_ahead", "damage_percent",
+  "team_size", "my_index", "my_role",
 ]);
 
 const VALID_ACTIONS = new Set([
   "move_to", "move_toward", "strafe_left", "strafe_right", "stop",
   "attack", "fire_at", "use_ability", "shield", "retreat",
   "mark_target", "capture", "ping",
+  "burst_fire", "grenade",
   "move_forward", "move_backward", "turn_left", "turn_right",
 ]);
 
@@ -64,6 +66,35 @@ export class SemanticAnalyzer {
               program.meta.span.line, program.meta.span.column,
             );
           }
+        }
+      }
+    }
+
+    // Validate squad composition
+    if (program.squad) {
+      const { size, roles, span } = program.squad;
+      if (size !== undefined) {
+        const parsedSize = Number(size);
+        if (!Number.isInteger(parsedSize) || parsedSize < 1 || parsedSize > 5) {
+          this.#addError("squad.size must be an integer from 1 to 5", span.line, span.column);
+        }
+      }
+      if (roles) {
+        if (!Array.isArray(roles) || roles.length === 0) {
+          this.#addError("squad.roles must contain at least one role string", span.line, span.column);
+        }
+        const normalized = new Set();
+        for (const role of roles) {
+          if (!role || role.trim() === "") {
+            this.#addError("squad.roles cannot include empty strings", span.line, span.column);
+          }
+          if (normalized.has(role)) {
+            this.#addWarning(`Duplicate squad role '${role}'`, span.line, span.column);
+          }
+          normalized.add(role);
+        }
+        if (size !== undefined && roles.length > Number(size)) {
+          this.#addError("squad.roles length cannot exceed squad.size", span.line, span.column);
         }
       }
     }

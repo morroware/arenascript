@@ -194,6 +194,9 @@ export class Compiler {
     }
 
     const chunk = builder.toChunk();
+    const squadSizeRaw = program.squad?.size !== undefined ? Number(program.squad.size) : 1;
+    const squadSize = Number.isInteger(squadSizeRaw) ? squadSizeRaw : 1;
+    const squadRoles = Array.isArray(program.squad?.roles) ? program.squad.roles : [];
 
     return {
       program: {
@@ -207,6 +210,10 @@ export class Compiler {
         eventHandlers,
         functions,
         localWindowSize: chunk.localCount,
+        squad: {
+          size: squadSize,
+          roles: squadRoles,
+        },
       },
       constants: chunk.constants,
     };

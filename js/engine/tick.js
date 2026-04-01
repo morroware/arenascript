@@ -10,7 +10,7 @@ import { resolveMovement, applyMovement, resolveCollisions } from "./movement.js
 import { resolveCombat, updateProjectiles, updateCooldowns, applyDamage } from "./combat.js";
 import { VisibilityTracker, checkCooldownReady } from "./events.js";
 import { ReplayWriter } from "./replay.js";
-import { CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS } from "../shared/config.js";
+import { CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS, HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE } from "../shared/config.js";
 import { distance, vec2 } from "../shared/vec2.js";
 
 /**
@@ -37,37 +37,47 @@ export function runMatch(setup) {
   const teamSpawnOrder = new Map();
 
   for (const participant of setup.participants) {
-    const teamIndex = teamSpawnOrder.get(participant.teamId) ?? 0;
-    const spawnPosition = getSpawnPositionForTeam(world, participant.teamId, teamIndex);
-    teamSpawnOrder.set(participant.teamId, teamIndex + 1);
+    const requestedSquadSize = participant.program.squad?.size ?? 1;
+    const squadSize = Math.max(1, Math.min(5, Number(requestedSquadSize) || 1));
+    const roles = participant.program.squad?.roles ?? [];
 
-    const robot = world.spawnRobot(
-      participant.program.robotName,
-      participant.program.robotClass,
-      participant.teamId,
-      participant.program.programId,
-      spawnPosition,
-    );
+    for (let squadIndex = 0; squadIndex < squadSize; squadIndex++) {
+      const teamIndex = teamSpawnOrder.get(participant.teamId) ?? 0;
+      const spawnPosition = getSpawnPositionForTeam(world, participant.teamId, teamIndex);
+      teamSpawnOrder.set(participant.teamId, teamIndex + 1);
+      const squadRole = roles.length > 0 ? roles[squadIndex % roles.length] : null;
 
-    const vm = new VM(participant.program, robot.id, sensorGateway);
-    vm.setConstants(participant.constants);
-    robotVMs.set(robot.id, vm);
+      const robot = world.spawnRobot(
+        participant.program.robotName,
+        participant.program.robotClass,
+        participant.teamId,
+        participant.program.programId,
+        spawnPosition,
+        squadIndex,
+        squadSize,
+        squadRole,
+      );
 
-    robotStats.set(robot.id, {
-      damageDealt: 0,
-      damageTaken: 0,
-      kills: 0,
-      actionsExecuted: 0,
-      budgetExceeded: 0,
-    });
+      const vm = new VM(participant.program, robot.id, sensorGateway);
+      vm.setConstants(participant.constants);
+      robotVMs.set(robot.id, vm);
 
-    matchParticipants.push({
-      robotId: robot.id,
-      programId: participant.program.programId,
-      teamId: participant.teamId,
-      playerId: participant.playerId,
-      eloAtStart: 0,
-    });
+      robotStats.set(robot.id, {
+        damageDealt: 0,
+        damageTaken: 0,
+        kills: 0,
+        actionsExecuted: 0,
+        budgetExceeded: 0,
+      });
+
+      matchParticipants.push({
+        robotId: robot.id,
+        programId: participant.program.programId,
+        teamId: participant.teamId,
+        playerId: participant.playerId,
+        eloAtStart: 0,
+      });
+    }
   }
 
   // Create replay writer
@@ -158,6 +168,7 @@ export function runMatch(setup) {
 
     // Phase 8: Apply damage/effects (projectiles)
     updateProjectiles(world);
+    applyHealingZones(world);
 
     // Update capture points
     for (const cp of world.controlPoints.values()) {
@@ -261,6 +272,33 @@ function initializeArenaLayout(world) {
   // Side anchors for flank-vs-mid decision making.
   world.addCover(vec2(w * 0.33, h * 0.50), 6, 10);
   world.addCover(vec2(w * 0.67, h * 0.50), 6, 10);
+
+  // Larger arenas get additional seeded terrain and sustain objectives.
+  if (w >= 120 || h >= 120) {
+    for (let i = 0; i < 2; i++) {
+      const x = i === 0
+        ? world.rng.nextFloat(w * 0.18, w * 0.35)
+        : world.rng.nextFloat(w * 0.65, w * 0.82);
+      const y = world.rng.nextFloat(h * 0.28, h * 0.72);
+      const width = world.rng.nextFloat(3, 7);
+      const height = world.rng.nextFloat(3, 7);
+      world.addCover(vec2(x, y), width, height);
+    }
+
+    // Risk/reward sustain zones pull teams into dynamic map control choices.
+    world.addHealingZone(vec2(w * 0.25, h * 0.25), HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE);
+    world.addHealingZone(vec2(w * 0.75, h * 0.75), HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE);
+  }
+}
+
+function applyHealingZones(world) {
+  for (const zone of world.healingZones.values()) {
+    for (const robot of world.getAliveRobots()) {
+      if (distance(robot.position, zone.position) <= zone.radius) {
+        robot.health = Math.min(robot.maxHealth, robot.health + zone.healPerTick);
+      }
+    }
+  }
 }
 
 function getSpawnPositionForTeam(world, teamId, teamMemberIndex) {

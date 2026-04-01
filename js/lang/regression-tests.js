@@ -7,7 +7,7 @@ import { compile } from "./pipeline.js";
 import { VM } from "../runtime/vm.js";
 import { runMatch } from "../engine/tick.js";
 import { World } from "../engine/world.js";
-import { resolveCombat } from "../engine/combat.js";
+import { resolveCombat, updateProjectiles } from "../engine/combat.js";
 
 function parseSource(source) {
   const tokens = new Lexer(source).tokenize();
@@ -467,6 +467,123 @@ on tick {
   assert.ok(totalActions > 0, "Expected parity bot primitives to execute runtime actions");
 }
 
+function testSquadBlockCompiles() {
+  const source = `robot "SquadLead" version "1.0"
+squad {
+  size: 3
+  roles: "anchor", "flank", "support"
+}
+state {
+  lane: number = 0
+}
+on tick {
+  set lane = my_index()
+  if my_role() == "anchor" {
+    move_to nearest_control_point().position
+  } else {
+    let enemy = nearest_enemy()
+    if enemy != null {
+      move_toward enemy.position
+    }
+  }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+  assert.equal(result.program.squad.size, 3);
+  assert.equal(result.program.squad.roles.length, 3);
+}
+
+function testSquadSizeSpawnsMultipleRobotsPerParticipant() {
+  const squadBot = compile(`robot "Alpha" version "1.0"
+squad {
+  size: 2
+  roles: "left", "right"
+}
+on tick {
+  if my_index() == 0 {
+    move_forward
+  } else {
+    move_backward
+  }
+}`);
+  const soloBot = compile(`robot "Beta" version "1.0"
+on tick {
+  move_forward
+}`);
+  assert.ok(squadBot.success, `Compile failed: ${squadBot.errors.join(", ")}`);
+  assert.ok(soloBot.success, `Compile failed: ${soloBot.errors.join(", ")}`);
+
+  const result = runMatch({
+    config: {
+      mode: "2v1_unranked",
+      arenaWidth: 100,
+      arenaHeight: 100,
+      maxTicks: 20,
+      tickRate: 30,
+      seed: 123,
+    },
+    participants: [
+      { program: squadBot.program, constants: squadBot.constants, playerId: "teamA", teamId: 0 },
+      { program: soloBot.program, constants: soloBot.constants, playerId: "teamB", teamId: 1 },
+    ],
+  });
+
+  const teamCounts = new Map();
+  for (const participant of result.replay.metadata.participants) {
+    teamCounts.set(participant.teamId, (teamCounts.get(participant.teamId) ?? 0) + 1);
+  }
+  assert.equal(teamCounts.get(0), 2, "Team 0 should have two spawned robots from squad.size");
+  assert.equal(teamCounts.get(1), 1, "Team 1 should keep default single robot");
+}
+
+function testNewCombatActionsCompileAndRun() {
+  const source = `robot "Arsenal" version "1.0"
+on tick {
+  let enemy = nearest_enemy()
+  if enemy != null {
+    if distance_to(enemy.position) > 10 {
+      move_toward enemy.position
+    } else if distance_to(enemy.position) < 6 {
+      grenade enemy.position
+    } else {
+      burst_fire enemy.position
+    }
+  }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+
+  const world = new World({
+    mode: "test",
+    arenaWidth: 120,
+    arenaHeight: 120,
+    maxTicks: 100,
+    tickRate: 30,
+    seed: 7,
+  });
+  const attacker = world.spawnRobot("A", "ranger", 0, "prog_a", { x: 20, y: 20 });
+  const defender = world.spawnRobot("D", "ranger", 1, "prog_d", { x: 24, y: 20 });
+  const healthBefore = defender.health;
+
+  resolveCombat(world, attacker, { type: "grenade", target: { x: 24, y: 20 } });
+  resolveCombat(world, attacker, { type: "burst_fire", target: { x: 24, y: 20 } });
+  updateProjectiles(world);
+
+  assert.ok(defender.health < healthBefore, "Expected burst_fire/grenade actions to deal damage");
+}
+
+function testHealingZonesAndSensorsCompile() {
+  const source = `robot "MedicScout" version "1.0"
+on tick {
+  let heal = nearest_heal_zone()
+  if heal != null and health() < max_health() {
+    move_to heal.position
+  }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -493,6 +610,10 @@ function run() {
     testAttackRequiresVisibility,
     testActiveScanAndMemorySensorsCompile,
     testTacticalParityPrimitivesCompileAndRun,
+    testSquadBlockCompiles,
+    testSquadSizeSpawnsMultipleRobotsPerParticipant,
+    testNewCombatActionsCompileAndRun,
+    testHealingZonesAndSensorsCompile,
   ];
 
   let passed = 0;
