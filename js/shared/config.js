@@ -29,6 +29,9 @@ export const GRENADE_DAMAGE = 16;
 export const GRENADE_RADIUS = 3.5;
 export const GRENADE_RANGE = 16.0;
 export const GRENADE_COOLDOWN = 18;
+export const BURST_FIRE_ENERGY_COST = 15;
+export const GRENADE_ENERGY_COST = 20;
+export const SHIELD_ENERGY_COST = 15;
 export const PROJECTILE_SPEED = 4.0;
 export const PROJECTILE_TTL = 20; // ticks
 // --- Perception ---

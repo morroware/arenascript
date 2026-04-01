@@ -3,6 +3,7 @@
 // ============================================================================
 import { runMatch } from "../engine/tick.js";
 import { SeededRNG } from "../shared/prng.js";
+import { ARENA_WIDTH, ARENA_HEIGHT, MAX_TICKS, TICK_RATE } from "../shared/config.js";
 export class TournamentManager {
     tournaments = new Map();
     createTournament(name, format, entries, seed = Date.now()) {
@@ -88,10 +89,10 @@ export class TournamentManager {
             const setup = {
                 config: {
                     mode: "tournament",
-                    arenaWidth: 100,
-                    arenaHeight: 100,
-                    maxTicks: 3000,
-                    tickRate: 30,
+                    arenaWidth: ARENA_WIDTH,
+                    arenaHeight: ARENA_HEIGHT,
+                    maxTicks: MAX_TICKS,
+                    tickRate: TICK_RATE,
                     seed: rng.nextInt(0, 2147483647),
                 },
                 participants: [
@@ -199,7 +200,11 @@ export class TournamentManager {
                 completed: false,
             });
         }
-        // Bye for odd participant (auto-advance highest remaining)
+        // Bye for odd participant (auto-advance highest remaining seed)
+        if (sorted.length % 2 !== 0) {
+            const byePlayer = sorted[Math.floor(sorted.length / 2)];
+            byePlayer.wins++;
+        }
         return matches;
     }
     generateRoundRobinPairings(tournament, roundIndex) {

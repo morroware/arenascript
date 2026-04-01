@@ -3,6 +3,7 @@
 // Matchmaking — Elo-based queue pairing
 // ============================================================================
 
+require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/ranked.php';
 
 const ELO_RANGE_BASE              = 100;
@@ -103,10 +104,10 @@ class MatchmakingQueue
                         'player2' => $p2,
                         'config'  => [
                             'mode'        => $p1['mode'],
-                            'arenaWidth'  => 100,
-                            'arenaHeight' => 100,
-                            'maxTicks'    => 3000,
-                            'tickRate'    => 30,
+                            'arenaWidth'  => ARENA_WIDTH,
+                            'arenaHeight' => ARENA_HEIGHT,
+                            'maxTicks'    => MAX_TICKS,
+                            'tickRate'    => TICK_RATE,
                             'seed'        => random_int(0, 2147483646),
                         ],
                     ];

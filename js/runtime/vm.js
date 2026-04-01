@@ -146,7 +146,7 @@ export class VM {
           case Op.GT:  { const b = this.popNum(); const a = this.popNum(); this.push(a > b); break; }
           case Op.GTE: { const b = this.popNum(); const a = this.popNum(); this.push(a >= b); break; }
 
-          // Logic
+          // Logic (AND/OR opcodes are reserved but unused — compiler emits short-circuit jumps instead)
           case Op.AND: { const b = this.popBool(); const a = this.popBool(); this.push(a && b); break; }
           case Op.OR:  { const b = this.popBool(); const a = this.popBool(); this.push(a || b); break; }
           case Op.NOT: { this.push(!this.popBool()); break; }

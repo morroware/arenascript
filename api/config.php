@@ -7,8 +7,8 @@ const ENGINE_VERSION = '0.1.0';
 const LANGUAGE_VERSION = '1.0';
 
 // --- Arena ---
-const ARENA_WIDTH = 100;
-const ARENA_HEIGHT = 100;
+const ARENA_WIDTH = 140;
+const ARENA_HEIGHT = 140;
 
 // --- Tick ---
 const TICK_RATE = 30; // ticks per second
@@ -29,6 +29,16 @@ const ATTACK_ENERGY_COST = 10;
 const FIRE_AT_DAMAGE = 8;
 const FIRE_AT_RANGE = 15.0;
 const FIRE_AT_COOLDOWN = 8;
+const BURST_FIRE_DAMAGE = 5;
+const BURST_FIRE_RANGE = 12.0;
+const BURST_FIRE_COOLDOWN = 10;
+const BURST_FIRE_ENERGY_COST = 15;
+const GRENADE_DAMAGE = 16;
+const GRENADE_RADIUS = 3.5;
+const GRENADE_RANGE = 16.0;
+const GRENADE_COOLDOWN = 18;
+const GRENADE_ENERGY_COST = 20;
+const SHIELD_ENERGY_COST = 15;
 const PROJECTILE_SPEED = 4.0;
 const PROJECTILE_TTL = 20; // ticks
 

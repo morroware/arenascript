@@ -7,9 +7,9 @@ import { getVisibleEnemies, hasLineOfSight } from "./los.js";
 import {
   CLASS_STATS, ATTACK_DAMAGE, ATTACK_RANGE, ATTACK_COOLDOWN, ATTACK_ENERGY_COST,
   FIRE_AT_DAMAGE, FIRE_AT_RANGE, FIRE_AT_COOLDOWN, PROJECTILE_SPEED, PROJECTILE_TTL,
-  BURST_FIRE_DAMAGE, BURST_FIRE_RANGE, BURST_FIRE_COOLDOWN,
-  GRENADE_DAMAGE, GRENADE_RADIUS, GRENADE_RANGE, GRENADE_COOLDOWN,
-  SHIELD_DURATION, SHIELD_COOLDOWN, LOW_HEALTH_THRESHOLD,
+  BURST_FIRE_DAMAGE, BURST_FIRE_RANGE, BURST_FIRE_COOLDOWN, BURST_FIRE_ENERGY_COST,
+  GRENADE_DAMAGE, GRENADE_RADIUS, GRENADE_RANGE, GRENADE_COOLDOWN, GRENADE_ENERGY_COST,
+  SHIELD_DURATION, SHIELD_COOLDOWN, SHIELD_ENERGY_COST, LOW_HEALTH_THRESHOLD,
 } from "../shared/config.js";
 
 /** Resolve a combat action for a robot */
@@ -80,6 +80,7 @@ export function resolveCombat(world, robot, action) {
         world.spawnProjectile(robot.id, { ...robot.position }, vel, BURST_FIRE_DAMAGE, PROJECTILE_TTL);
       }
       robot.cooldowns.set("attack", BURST_FIRE_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - BURST_FIRE_ENERGY_COST);
       robot.heading = baseDir;
       break;
     }
@@ -97,6 +98,7 @@ export function resolveCombat(world, robot, action) {
         }
       }
       robot.cooldowns.set("attack", GRENADE_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - GRENADE_ENERGY_COST);
       robot.heading = normalize(sub(targetPos, robot.position));
       break;
     }
@@ -107,6 +109,7 @@ export function resolveCombat(world, robot, action) {
       // Apply shield as a health restore capped at maxHealth
       robot.health = Math.min(robot.maxHealth, robot.health + 20);
       robot.cooldowns.set("shield", SHIELD_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - SHIELD_ENERGY_COST);
       break;
     }
 

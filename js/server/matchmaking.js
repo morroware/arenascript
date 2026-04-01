@@ -1,6 +1,7 @@
 // ============================================================================
 // Matchmaking — Elo-based queue pairing
 // ============================================================================
+import { ARENA_WIDTH, ARENA_HEIGHT, MAX_TICKS, TICK_RATE } from "../shared/config.js";
 const ELO_RANGE_BASE = 100;
 const ELO_RANGE_EXPANSION_PER_SEC = 10;
 const MAX_ELO_RANGE = 500;
@@ -53,10 +54,10 @@ export class MatchmakingQueue {
                         player2: p2,
                         config: {
                             mode: p1.mode,
-                            arenaWidth: 100,
-                            arenaHeight: 100,
-                            maxTicks: 3000,
-                            tickRate: 30,
+                            arenaWidth: ARENA_WIDTH,
+                            arenaHeight: ARENA_HEIGHT,
+                            maxTicks: MAX_TICKS,
+                            tickRate: TICK_RATE,
                             seed: Math.floor(Math.random() * 2147483647),
                         },
                     };

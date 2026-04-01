@@ -2,7 +2,10 @@
 // Action Gateway — Intent collection and validation
 // ============================================================================
 
-import { CLASS_STATS, ATTACK_COOLDOWN } from "../shared/config.js";
+import {
+  CLASS_STATS, ATTACK_COOLDOWN, ATTACK_ENERGY_COST,
+  BURST_FIRE_ENERGY_COST, GRENADE_ENERGY_COST, SHIELD_ENERGY_COST,
+} from "../shared/config.js";
 
 export function normalizeActionIntent(intent) {
   if (!intent || typeof intent !== "object") return intent;
@@ -26,9 +29,21 @@ export function validateAction(intent, robot) {
       if (cd > 0) {
         return { intent: normalized, valid: false, reason: `Attack on cooldown (${cd} ticks remaining)` };
       }
-      const stats = CLASS_STATS[robot.class];
-      if (stats && robot.energy < (stats.attackDamage ?? 10)) {
+      const energyCosts = { attack: ATTACK_ENERGY_COST, fire_at: ATTACK_ENERGY_COST, burst_fire: BURST_FIRE_ENERGY_COST, grenade: GRENADE_ENERGY_COST };
+      const requiredEnergy = energyCosts[normalized.type] ?? ATTACK_ENERGY_COST;
+      if (robot.energy < requiredEnergy) {
         return { intent: normalized, valid: false, reason: "Insufficient energy" };
+      }
+      return { intent: normalized, valid: true };
+    }
+
+    case "shield": {
+      const cd = robot.cooldowns.get("shield") ?? 0;
+      if (cd > 0) {
+        return { intent: normalized, valid: false, reason: `Shield on cooldown (${cd} ticks remaining)` };
+      }
+      if (robot.energy < SHIELD_ENERGY_COST) {
+        return { intent: normalized, valid: false, reason: "Insufficient energy for shield" };
       }
       return { intent: normalized, valid: true };
     }
@@ -52,7 +67,6 @@ export function validateAction(intent, robot) {
     case "strafe_right":
     case "stop":
     case "retreat":
-    case "shield":
     case "mark_target":
     case "capture":
     case "ping":

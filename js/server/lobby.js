@@ -1,6 +1,7 @@
 // ============================================================================
 // Lobby System — Multiplayer match orchestration
 // ============================================================================
+import { ARENA_WIDTH, ARENA_HEIGHT, MAX_TICKS, TICK_RATE } from "../shared/config.js";
 export class LobbyManager {
     lobbies = new Map();
     matchRunner;
@@ -103,10 +104,10 @@ export class LobbyManager {
             participants: readyPlayers,
             config: {
                 mode: lobby.mode,
-                arenaWidth: 100,
-                arenaHeight: 100,
-                maxTicks: 3000,
-                tickRate: 30,
+                arenaWidth: ARENA_WIDTH,
+                arenaHeight: ARENA_HEIGHT,
+                maxTicks: MAX_TICKS,
+                tickRate: TICK_RATE,
                 seed: Math.floor(Math.random() * 2147483647),
             },
         });

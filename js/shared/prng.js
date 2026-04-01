@@ -24,7 +24,7 @@ export class SeededRNG {
     /** Returns a uint32 */
     nextU32() {
         const s = this.s;
-        const result = Math.imul(s[1] * 5, 1) >>> 0;
+        const result = Math.imul(s[1], 5) >>> 0;
         const rotl = ((result << 7) | (result >>> 25)) >>> 0;
         const final = (Math.imul(rotl, 9)) >>> 0;
         const t = (s[1] << 9) >>> 0;
