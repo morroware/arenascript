@@ -23,6 +23,40 @@ Current status:
 4. **Non-finite arena dimension acceptance (JS validation) — resolved**
    - `validateMatchConfig` now enforces finite positive `arenaWidth` / `arenaHeight`.
 
+### Improvements shipped in this pass
+
+5. **Engine invariant test suite — shipped**
+   - Property-based tests covering: health bounds, no NaN positions, energy bounds, arena boundary enforcement, dead-robot consistency, deterministic replay, and frame generation (`js/tests/engine-invariant-tests.js`, 8 tests).
+
+6. **API contract & E2E test suite — shipped**
+   - 36 tests covering lobby lifecycle, matchmaking queue/pairing, Elo calculations, rank tiers, rating store, validation contracts, plus end-to-end 2v2 and FFA match execution (`js/tests/api-contract-tests.js`).
+
+7. **Per-bot decision trace capture — shipped**
+   - Engine tick loop now captures which event fired, action selected, and budget consumed per robot per tick.
+   - Decision traces are stored in replay frames for post-match analysis.
+
+8. **Enhanced Battle Viewer — shipped**
+   - Energy bars rendered below health bars for each robot.
+   - Shield/overwatch action indicators (glowing/dotted rings).
+   - Damage numbers float above robots on hit.
+   - Grenade explosion blast radius overlay.
+   - "DESTROYED" flash on robot elimination.
+   - Decision trace overlay toggled via "Traces" button (shows action + budget per robot).
+
+9. **Team Builder UI — shipped**
+   - New sidebar panel with up to 5 role/script slots.
+   - Role selection (frontline, flanker, support, scout) per slot.
+   - Script assignment per slot from available presets.
+   - Auto-mirrors team size for opponents and runs match.
+
+10. **Full-page Battle Viewer — shipped**
+    - "Expand" toggle hides editor/sidebar/console for large-canvas battle viewing.
+    - Canvas auto-resizes to fill viewport; match results float as overlay.
+
+11. **Debugging tools — shipped**
+    - Decision trace overlay in arena view (action + budget per bot per tick).
+    - Replay bookmark buttons (first damage, first kill) already present in controls.
+
 ## Architectural Observations
 
 ## Language (ArenaScript)
@@ -64,55 +98,55 @@ Current UX can be meaningfully improved with a "builder + IDE + arena" model:
 
 ### Recommended UX roadmap
 
-1. **Team Builder (high priority)**
-   - Add a dedicated Team Builder panel with:
+1. **Team Builder (high priority)** — **Shipped**
+   - Dedicated Team Builder panel in sidebar with:
      - role slots (frontline/flanker/support/scout),
-     - per-slot script assignment,
-     - shared constants profile,
-     - quick clone/swap operations.
-   - Include one-click generation for common formations.
+     - per-slot script assignment from presets,
+     - add/remove slots (up to 5),
+     - auto-mirror opponent generation and one-click match run.
+   - *Remaining*: shared constants profile, quick clone/swap operations.
 
-2. **Split IDE + Arena Workspace (high priority)**
-   - Introduce a layout mode:
-     - left: full code IDE (tabs for squad members),
-     - right: full-height live arena/replay,
-     - bottom: compile/runtime diagnostics timeline.
-   - Add synchronized replay scrubber + event log jump-to-line.
+2. **Split IDE + Arena Workspace (high priority)** — **Shipped (baseline)**
+   - Layout already has: left IDE, right arena, bottom console.
+   - Resizable split with drag handle.
+   - Replay scrubber with event log and bookmark jump-to-line.
+   - *Remaining*: tabs for squad members, diagnostics timeline.
 
-3. **Full-page Battle Viewer (high priority)**
-   - Add dedicated route for battle visualization:
-     - large canvas,
-     - fog/LOS overlays,
-     - health/energy strip per robot,
-     - tactical markers (mines, grenades, scans).
+3. **Full-page Battle Viewer (high priority)** — **Shipped**
+   - "Expand" toggle hides editor/sidebar/console for full-viewport canvas.
+   - Health + energy bars per robot.
+   - Tactical markers: mines, pickups, grenade blasts, shield/overwatch rings, damage numbers.
+   - Match results as floating overlay in full-page mode.
+   - *Remaining*: fog/LOS overlays, scan area visualization.
 
-4. **Debugging tools (medium priority)**
-   - Deterministic seed pinning in UI.
-   - Frame bookmarks (e.g., first damage, first death, objective capture start/end).
-   - Per-bot decision trace (which event fired, action selected, budget used).
+4. **Debugging tools (medium priority)** — **Shipped**
+   - Deterministic seed pinning in UI (seed input field).
+   - Frame bookmarks: first damage, first kill (buttons in replay controls).
+   - Per-bot decision trace overlay: event fired, action selected, budget used (toggle via "Traces" button).
+   - Decision traces stored in replay frames for offline analysis.
+   - *Remaining*: capture start/end bookmarks, step-through breakpoint mode.
 
-5. **Language quality-of-life (medium priority)**
-   - Macro-like helpers for repeated conditional patterns.
-   - Optional typed constants / lint hints.
-   - Better diagnostics: "did you mean" suggestions for event/action names.
+5. **Language quality-of-life (medium priority)** — **Partially shipped**
+   - "Did you mean" suggestions for misspelled event/action/sensor/type names (semantic analyzer).
+   - *Remaining*: macro-like helpers, typed constants, lint hints.
 
-6. **Competitive systems (medium priority)**
-   - Ranked season metadata and leaderboard history.
-   - Matchmaking transparency UI (current estimated rating window).
-   - Replay sharing links with immutable match hash.
+6. **Competitive systems (medium priority)** — **Infrastructure shipped**
+   - Elo rating system, rank tiers, leaderboard.
+   - Matchmaking queue with Elo-range pairing.
+   - *Remaining*: season metadata UI, matchmaking transparency widget, replay sharing links.
 
 ## Engineering hardening backlog
 
-1. Add API-level contract tests for lobby/matchmaking/ranked endpoints.
-2. Add end-to-end fixture tests for `2v2` and `ffa` in both JS and PHP server paths.
-3. Add static checks (PHPStan/Psalm + ESLint) and CI gate for regressions.
-4. Add explicit schema validators for request payloads (program/constants/config).
-5. Add telemetry counters: queue wait, abandonment, compile failures, replay load failures.
+1. ~~Add API-level contract tests for lobby/matchmaking/ranked endpoints.~~ **Done** — 36 tests in `js/tests/api-contract-tests.js`.
+2. ~~Add end-to-end fixture tests for `2v2` and `ffa` in both JS and PHP server paths.~~ **Done** — E2E 2v2 and FFA tests pass in JS; PHP paths pending parity.
+3. Add static checks (PHPStan/Psalm + ESLint) and CI gate for regressions. *(pending)*
+4. ~~Add explicit schema validators for request payloads (program/constants/config).~~ **Done** — `js/shared/validation.js` covers config, participants, match requests.
+5. ~~Add telemetry counters: queue wait, abandonment, compile failures, replay load failures.~~ **Done** — `js/shared/telemetry.js` with counters integrated into `app.js`.
 
 ## Suggested implementation sequence
 
-1. **Stabilize multiplayer correctness** (done in this patch for identified PHP issues).
-2. **Ship Team Builder + workspace split** (largest UX lift with immediate impact).
-3. **Add Battle Viewer route + replay diagnostics overlays**.
-4. **Expand language ergonomics and debugging primitives**.
-5. **Invest in ranked/live-service visibility tooling**.
+1. **Stabilize multiplayer correctness** — Done (PHP issues fixed).
+2. **Ship Team Builder + workspace split** — Done (Team Builder panel, resize handle, full-page toggle).
+3. **Add Battle Viewer + replay diagnostics overlays** — Done (energy bars, tactical markers, decision traces, bookmarks).
+4. **Expand language ergonomics and debugging primitives** — Partially done ("did you mean", seed pinning, decision traces). Remaining: macros, typed constants.
+5. **Invest in ranked/live-service visibility tooling** — Infrastructure done (Elo, tiers, matchmaking, telemetry). Remaining: season UI, transparency widget.

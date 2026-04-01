@@ -683,6 +683,12 @@ const resultsRobotDetailEl = document.getElementById("results-robot-detail");
 
 const btnBookmarkDamage = document.getElementById("btn-bookmark-damage");
 const btnBookmarkKill = document.getElementById("btn-bookmark-kill");
+const btnToggleTraces = document.getElementById("btn-toggle-traces");
+const btnToggleFullpage = document.getElementById("btn-toggle-fullpage");
+const btnAddSlot = document.getElementById("btn-add-slot");
+const btnRemoveSlot = document.getElementById("btn-remove-slot");
+const btnRunTeamBuilder = document.getElementById("btn-run-team-builder");
+const teamBuilderSlots = document.getElementById("team-builder-slots");
 
 const ctx = canvasEl.getContext("2d");
 
@@ -694,6 +700,8 @@ let compiledPlayer = null;
 let currentPreset = "bruiser";
 let lastMatchResult = null;
 let lastCompileErrors = [];
+let showDecisionTraces = false;
+let fullPageBattle = false;
 
 // Replay state
 let replayData = null;
@@ -1406,7 +1414,7 @@ function drawArenaBackground() {
   }
 }
 
-function drawRobot(x, y, health, maxHealth, teamId, label, isAlive) {
+function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, isAlive, action) {
   const s = canvasScale();
   const cx = x * s;
   const cy = y * s;
@@ -1427,6 +1435,27 @@ function drawRobot(x, y, health, maxHealth, teamId, label, isAlive) {
     return;
   }
 
+  // Shield indicator (glowing ring)
+  const actionType = action?.combat?.type ?? action?.movement?.type ?? null;
+  if (actionType === "shield") {
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius + 7, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(0,200,255,0.6)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+
+  // Overwatch indicator (dotted ring)
+  if (actionType === "overwatch") {
+    ctx.beginPath();
+    ctx.setLineDash([3, 3]);
+    ctx.arc(cx, cy, radius + 6, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(170,85,255,0.6)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   // Glow
   ctx.beginPath();
   ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
@@ -1444,11 +1473,20 @@ function drawRobot(x, y, health, maxHealth, teamId, label, isAlive) {
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
+  // Class letter inside robot body
+  const classLetter = { brawler: "B", ranger: "R", tank: "T", support: "S" };
+  ctx.fillStyle = "#000";
+  ctx.font = `bold ${Math.max(7, 1.8 * s)}px sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(classLetter[label] || "", cx, cy);
+  ctx.textBaseline = "alphabetic";
+
   // Health bar
   const barW = radius * 2.8;
   const barH = 3;
   const barX = cx - barW / 2;
-  const barY = cy - radius - 9;
+  const barY = cy - radius - 14;
   const hpRatio = Math.max(0, health / maxHealth);
 
   ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -1457,6 +1495,16 @@ function drawRobot(x, y, health, maxHealth, teamId, label, isAlive) {
   const hpColor = hpRatio > 0.5 ? "#00ff88" : hpRatio > 0.25 ? "#ff8800" : "#ff3355";
   ctx.fillStyle = hpColor;
   ctx.fillRect(barX, barY, barW * hpRatio, barH);
+
+  // Energy bar (below health bar)
+  const eBarY = barY + barH + 2;
+  const eBarH = 2;
+  const eRatio = maxEnergy > 0 ? Math.max(0, (energy ?? 0) / maxEnergy) : 0;
+
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.fillRect(barX - 0.5, eBarY - 0.5, barW + 1, eBarH + 1);
+  ctx.fillStyle = "#4488ff";
+  ctx.fillRect(barX, eBarY, barW * eRatio, eBarH);
 
   // HP text
   ctx.fillStyle = "#ffffff";
@@ -1555,12 +1603,14 @@ function drawFrame(frame, labels) {
 
   for (let i = 0; i < frame.robots.length; i++) {
     const r = frame.robots[i];
-    const maxHP = CLASS_STATS[r.robotClass]?.health || 100;
+    const classStats = CLASS_STATS[r.robotClass];
+    const maxHP = classStats?.health || 100;
+    const maxEnergy = classStats?.energy || 100;
     const isAlive = r.health > 0;
-    drawRobot(r.position.x, r.position.y, r.health, maxHP, r.teamId, labels[r.id] || r.id, isAlive);
+    drawRobot(r.position.x, r.position.y, r.health, maxHP, r.energy, maxEnergy, r.teamId, labels[r.id] || r.id, isAlive, r.action);
   }
 
-  // Draw event indicators (damage flashes, etc.)
+  // Draw event indicators (damage flashes, grenade explosions, etc.)
   if (frame.events) {
     for (const evt of frame.events) {
       if (evt.type === "damaged" && evt.data) {
@@ -1573,8 +1623,64 @@ function drawFrame(frame, labels) {
           ctx.arc(cx, cy, 6 * s, 0, Math.PI * 2);
           ctx.fillStyle = "rgba(255,51,85,0.2)";
           ctx.fill();
+
+          // Draw damage number floating up
+          ctx.fillStyle = "rgba(255,80,100,0.9)";
+          ctx.font = `bold ${Math.max(8, 2 * s)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText(`-${evt.data.damage}`, cx + 8, cy - 14);
+        }
+
+        // Grenade explosion marker (larger blast radius indicator)
+        if (evt.data.source === "grenade" || evt.data.damageType === "grenade") {
+          const s = canvasScale();
+          const pos = targetRobot?.position ?? evt.data.position;
+          if (pos) {
+            const gx = pos.x * s;
+            const gy = pos.y * s;
+            ctx.beginPath();
+            ctx.arc(gx, gy, 3.5 * s, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(255,160,0,0.25)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(255,160,0,0.6)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
         }
       }
+
+      // Destroyed marker
+      if (evt.type === "destroyed") {
+        const deadBot = frame.robots.find(r => r.id === evt.robotId);
+        if (deadBot) {
+          const s = canvasScale();
+          const dx = deadBot.position.x * s;
+          const dy = deadBot.position.y * s;
+          ctx.fillStyle = "rgba(255,0,0,0.5)";
+          ctx.font = `bold ${Math.max(10, 3 * s)}px sans-serif`;
+          ctx.textAlign = "center";
+          ctx.fillText("DESTROYED", dx, dy - 20);
+        }
+      }
+    }
+  }
+
+  // Draw decision traces overlay (if enabled and available)
+  if (showDecisionTraces && frame.traces) {
+    const s = canvasScale();
+    ctx.font = `${Math.max(7, 1.5 * s)}px monospace`;
+    ctx.textAlign = "left";
+    for (const trace of frame.traces) {
+      const robot = frame.robots.find(r => r.id === trace.robotId);
+      if (!robot || robot.health <= 0) continue;
+      const tx = robot.position.x * s + 12;
+      const ty = robot.position.y * s - 8;
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      const text = `${trace.action ?? "idle"} [${trace.budgetUsed}]`;
+      const metrics = ctx.measureText(text);
+      ctx.fillRect(tx - 2, ty - 8, metrics.width + 4, 11);
+      ctx.fillStyle = "rgba(200,200,255,0.9)";
+      ctx.fillText(text, tx, ty);
     }
   }
 }
@@ -1896,6 +2002,169 @@ document.addEventListener("keydown", (e) => {
     doCompile();
   }
 });
+
+// ============================================================================
+// Team Builder
+// ============================================================================
+
+const MAX_TEAM_SLOTS = 5;
+
+function createSlotHTML(slotIndex) {
+  const div = document.createElement("div");
+  div.className = "team-slot";
+  div.dataset.slot = slotIndex;
+  div.innerHTML = `
+    <select class="team-slot-role" data-slot="${slotIndex}">
+      <option value="">Role...</option>
+      <option value="frontline">Frontline</option>
+      <option value="flanker">Flanker</option>
+      <option value="support">Support</option>
+      <option value="scout">Scout</option>
+    </select>
+    <select class="team-slot-script" data-slot="${slotIndex}">
+      <option value="bruiser">Bruiser</option>
+      <option value="kiter">Kiter</option>
+      <option value="fortress">Fortress</option>
+      <option value="healer">Healer</option>
+      <option value="flanker">Flanker</option>
+      <option value="sentinel">Sentinel</option>
+    </select>`;
+  return div;
+}
+
+function addTeamSlot() {
+  if (!teamBuilderSlots) return;
+  const currentSlots = teamBuilderSlots.querySelectorAll(".team-slot").length;
+  if (currentSlots >= MAX_TEAM_SLOTS) {
+    logToConsole("Max 5 team slots.", "warn");
+    return;
+  }
+  teamBuilderSlots.appendChild(createSlotHTML(currentSlots));
+}
+
+function removeTeamSlot() {
+  if (!teamBuilderSlots) return;
+  const slots = teamBuilderSlots.querySelectorAll(".team-slot");
+  if (slots.length <= 1) return;
+  slots[slots.length - 1].remove();
+}
+
+function doRunTeamBuilder() {
+  if (!teamBuilderSlots) return;
+
+  const scriptSelects = teamBuilderSlots.querySelectorAll(".team-slot-script");
+  const allies = [];
+  for (const sel of scriptSelects) {
+    const key = sel.value;
+    const preset = BOT_PRESETS[key];
+    if (!preset) { logToConsole(`Unknown bot: ${key}`, "error"); return; }
+    try {
+      const compiled = compile(preset.source);
+      if (!compiled.success) { logToConsole(`${preset.name} compile fail: ${compiled.errors.join(", ")}`, "error"); return; }
+      allies.push({ preset, compiled });
+    } catch (e) {
+      logToConsole(`${preset.name} error: ${e.message}`, "error");
+      return;
+    }
+  }
+
+  if (allies.length < 1) { logToConsole("Add at least one team member.", "warn"); return; }
+
+  // Auto-select opponents: mirror team size with random presets
+  const oppKeys = ["kiter", "fortress", "bruiser", "healer", "sentinel"];
+  const opponents = [];
+  for (let i = 0; i < allies.length; i++) {
+    const key = oppKeys[i % oppKeys.length];
+    const preset = BOT_PRESETS[key];
+    const compiled = compile(preset.source);
+    if (!compiled.success) continue;
+    opponents.push({ preset, compiled });
+  }
+
+  const participants = [
+    ...allies.map(({ preset, compiled }, i) => ({
+      program: compiled.program, constants: compiled.constants,
+      playerId: `ally_${preset.name.toLowerCase()}_${i}`, teamId: 0,
+    })),
+    ...opponents.map(({ preset, compiled }, i) => ({
+      program: compiled.program, constants: compiled.constants,
+      playerId: `opp_${preset.name.toLowerCase()}_${i}`, teamId: 1,
+    })),
+  ];
+
+  const mode = participants.length <= 2 ? "duel_1v1" : "squad_2v2";
+  const setup = {
+    config: {
+      mode, arenaWidth: ARENA_WIDTH, arenaHeight: ARENA_HEIGHT,
+      maxTicks: 3000, tickRate: 30, seed: getMatchSeed(),
+    },
+    participants,
+  };
+
+  logToConsole(`\n--- Team Builder: ${allies.length}v${opponents.length} ---`, "event");
+  let result;
+  try {
+    telemetry.increment(Telemetry.MATCH_RUN);
+    result = runMatch(setup);
+  } catch (e) {
+    telemetry.increment(Telemetry.MATCH_ERROR);
+    logToConsole(`Match error: ${e.message}`, "error");
+    return;
+  }
+
+  telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
+  lastMatchResult = result;
+  logToConsole(`Winner: ${result.winner === null ? "DRAW" : `Team ${result.winner}`} | ${result.reason} | ${result.tickCount} ticks`, "success");
+  showMatchResults(result, "Opponents");
+  startReplay(result, "Team Battle");
+}
+
+// ============================================================================
+// Full-page Battle & Decision Traces Toggles
+// ============================================================================
+
+function toggleFullPageBattle() {
+  fullPageBattle = !fullPageBattle;
+  document.body.classList.toggle("fullpage-battle", fullPageBattle);
+  btnToggleFullpage?.classList.toggle("active", fullPageBattle);
+  btnToggleFullpage.textContent = fullPageBattle ? "Collapse" : "Expand";
+
+  // Resize canvas for full-page mode
+  if (fullPageBattle) {
+    const wrap = document.querySelector(".arena-canvas-wrap");
+    if (wrap) {
+      canvasEl.width = wrap.clientWidth - 20;
+      canvasEl.height = wrap.clientHeight - 20;
+    }
+  } else {
+    canvasEl.width = 400;
+    canvasEl.height = 400;
+  }
+
+  // Redraw current frame
+  if (replayData && replayData[replayFrameIndex]) {
+    drawFrame(replayData[replayFrameIndex], replayLabels);
+  }
+}
+
+function toggleDecisionTraces() {
+  showDecisionTraces = !showDecisionTraces;
+  btnToggleTraces?.classList.toggle("active", showDecisionTraces);
+
+  // Redraw current frame
+  if (replayData && replayData[replayFrameIndex]) {
+    drawFrame(replayData[replayFrameIndex], replayLabels);
+  }
+}
+
+// Wire Team Builder
+btnAddSlot?.addEventListener("click", addTeamSlot);
+btnRemoveSlot?.addEventListener("click", removeTeamSlot);
+btnRunTeamBuilder?.addEventListener("click", doRunTeamBuilder);
+
+// Wire Arena toggles
+btnToggleTraces?.addEventListener("click", toggleDecisionTraces);
+btnToggleFullpage?.addEventListener("click", toggleFullPageBattle);
 
 // ============================================================================
 // Init

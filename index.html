@@ -110,6 +110,52 @@
         </select>
         <button id="btn-run-team-sim" class="btn btn-run team-sim-btn">Run Team Sim</button>
       </div>
+
+      <!-- Team Builder -->
+      <div class="sidebar-section team-builder-section">
+        <label>Team Builder</label>
+        <div class="team-builder-slots" id="team-builder-slots">
+          <div class="team-slot" data-slot="0">
+            <select class="team-slot-role" data-slot="0">
+              <option value="">Role...</option>
+              <option value="frontline">Frontline</option>
+              <option value="flanker">Flanker</option>
+              <option value="support">Support</option>
+              <option value="scout">Scout</option>
+            </select>
+            <select class="team-slot-script" data-slot="0">
+              <option value="bruiser">Bruiser</option>
+              <option value="kiter">Kiter</option>
+              <option value="fortress">Fortress</option>
+              <option value="healer">Healer</option>
+              <option value="flanker">Flanker</option>
+              <option value="sentinel">Sentinel</option>
+            </select>
+          </div>
+          <div class="team-slot" data-slot="1">
+            <select class="team-slot-role" data-slot="1">
+              <option value="">Role...</option>
+              <option value="frontline">Frontline</option>
+              <option value="flanker">Flanker</option>
+              <option value="support">Support</option>
+              <option value="scout">Scout</option>
+            </select>
+            <select class="team-slot-script" data-slot="1">
+              <option value="bruiser">Bruiser</option>
+              <option value="kiter">Kiter</option>
+              <option value="fortress">Fortress</option>
+              <option value="healer">Healer</option>
+              <option value="flanker">Flanker</option>
+              <option value="sentinel">Sentinel</option>
+            </select>
+          </div>
+        </div>
+        <div class="team-builder-actions">
+          <button id="btn-add-slot" class="btn-small" title="Add slot (max 5)">+ Slot</button>
+          <button id="btn-remove-slot" class="btn-small" title="Remove last slot">- Slot</button>
+          <button id="btn-run-team-builder" class="btn btn-run team-sim-btn">Run Team</button>
+        </div>
+      </div>
     </aside>
 
     <!-- Main Content -->
@@ -151,6 +197,10 @@
           <div class="arena-header">
             <span class="label">Arena</span>
             <span id="arena-status">Idle</span>
+            <div class="arena-toggles">
+              <button id="btn-toggle-traces" class="arena-toggle-btn" title="Toggle decision traces">Traces</button>
+              <button id="btn-toggle-fullpage" class="arena-toggle-btn" title="Toggle full-page battle view">Expand</button>
+            </div>
           </div>
           <div class="arena-canvas-wrap">
             <canvas id="arena-canvas" width="400" height="400"></canvas>

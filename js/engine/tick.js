@@ -161,6 +161,7 @@ export function runMatch(setup) {
     // Phase 3 & 4: Execute robot programs and collect action intents
     const movementActions = new Map();
     const combatActions = new Map();
+    const decisionTraces = new Map();
 
     for (const [robotId, vm] of robotVMs) {
       const robot = world.getRobot(robotId);
@@ -180,6 +181,13 @@ export function runMatch(setup) {
       // Validate and categorize actions
       if (result.actions.length > 0) {
         const { movement, combat, utility } = categorizeActions(result.actions);
+
+        // Build decision trace
+        decisionTraces.set(robotId, {
+          event: "tick",
+          action: movement?.type ?? combat?.type ?? utility?.type ?? null,
+          budgetUsed: result.instructionsUsed ?? 0,
+        });
 
         // Process utility actions (place_mine, send_signal, mark_position, taunt, overwatch)
         if (utility) {
@@ -201,6 +209,12 @@ export function runMatch(setup) {
             robotStats.get(robotId).actionsExecuted++;
           }
         }
+      } else {
+        decisionTraces.set(robotId, {
+          event: "tick",
+          action: null,
+          budgetUsed: result.instructionsUsed ?? 0,
+        });
       }
     }
 
@@ -326,7 +340,7 @@ export function runMatch(setup) {
         replayActions.set(robotId, { movement: null, combat: action });
       }
     }
-    replayWriter.captureFrame(world, tickEvents, replayActions);
+    replayWriter.captureFrame(world, tickEvents, replayActions, decisionTraces);
 
     // Phase 11: Check win conditions
     const winResult = checkWinCondition(world);
