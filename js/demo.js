@@ -40,7 +40,7 @@ on tick {
       move_toward enemy.position
     }
   } else {
-    move_to nearest_control_point()
+    move_to nearest_enemy_control_point()
   }
 }
 
@@ -74,7 +74,7 @@ on tick {
   let enemy = nearest_enemy()
 
   if enemy == null {
-    move_to nearest_control_point()
+    move_to nearest_enemy_control_point()
     return
   }
 
@@ -105,28 +105,34 @@ meta {
   class: "tank"
 }
 
-state {
-  holding: boolean = false
-}
-
 on spawn {
-  move_to nearest_control_point()
+  move_to nearest_enemy_control_point()
 }
 
 on tick {
   let enemy = nearest_enemy()
-  if enemy != null {
-    if can_attack(enemy) {
-      attack enemy
-    }
+  if enemy == null {
+    move_to nearest_enemy_control_point()
+    return
   }
-  if not holding {
-    move_to nearest_control_point()
+
+  if health() < 55 {
+    shield
+    move_to nearest_enemy_control_point()
+    return
+  }
+
+  if can_attack(enemy) {
+    attack enemy
+  } else {
+    move_toward enemy.position
   }
 }
 
 on damaged {
-  shield
+  if health() < 45 {
+    shield
+  }
 }
 `;
 const SUPPORT_BOT = `
@@ -138,20 +144,35 @@ meta {
 }
 
 state {
-  mode: string = "follow"
+  retreating: boolean = false
 }
 
 on tick {
-  let ally = nearest_ally()
   let enemy = nearest_enemy()
 
-  if enemy != null and can_attack(enemy) {
-    attack enemy
-  } else if ally != null {
-    move_toward ally.position
-  } else {
-    move_to nearest_control_point()
+  if enemy == null {
+    move_to nearest_enemy_control_point()
+    return
   }
+
+  if health() < 35 {
+    set retreating = true
+    retreat
+    return
+  }
+
+  set retreating = false
+
+  if can_attack(enemy) {
+    attack enemy
+  } else {
+    move_toward enemy.position
+  }
+}
+
+on low_health {
+  set retreating = true
+  retreat
 }
 `;
 // ============================================================================
@@ -225,6 +246,31 @@ function main() {
                 }
             }
         }
+    }
+    separator("2B. ARENA — Running 2v2 Preset Team Simulation");
+    const bot3 = compiledBots[2].result;
+    const bot4 = compiledBots[3].result;
+    if (bot1.success && bot2.success && bot3.success && bot4.success) {
+        const teamSetup = {
+            config: {
+                mode: "squad_2v2",
+                arenaWidth: 100,
+                arenaHeight: 100,
+                maxTicks: 3000,
+                tickRate: 30,
+                seed: 4242,
+            },
+            participants: [
+                { program: bot1.program, constants: bot1.constants, playerId: "player1", teamId: 0 },
+                { program: bot4.program, constants: bot4.constants, playerId: "player4", teamId: 0 },
+                { program: bot2.program, constants: bot2.constants, playerId: "player2", teamId: 1 },
+                { program: bot3.program, constants: bot3.constants, playerId: "player3", teamId: 1 },
+            ],
+        };
+        const teamResult = runMatch(teamSetup);
+        console.log(`  Winner: Team ${teamResult.winner !== null ? teamResult.winner : "DRAW"}`);
+        console.log(`  Reason: ${teamResult.reason}`);
+        console.log(`  Ticks: ${teamResult.tickCount}`);
     }
     // --- 3. Ranked System ---
     separator("3. RANKED — Elo Rating System");

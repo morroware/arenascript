@@ -45,7 +45,7 @@ on tick {
       move_toward enemy.position
     }
   } else {
-    move_to nearest_control_point()
+    move_to nearest_enemy_control_point()
   }
 }
 
@@ -82,7 +82,7 @@ on tick {
   let enemy = nearest_enemy()
 
   if enemy == null {
-    move_to nearest_control_point()
+    move_to nearest_enemy_control_point()
     return
   }
 
@@ -116,28 +116,34 @@ meta {
   class: "tank"
 }
 
-state {
-  holding: boolean = false
-}
-
 on spawn {
-  move_to nearest_control_point()
+  move_to nearest_enemy_control_point()
 }
 
 on tick {
   let enemy = nearest_enemy()
-  if enemy != null {
-    if can_attack(enemy) {
-      attack enemy
-    }
+  if enemy == null {
+    move_to nearest_enemy_control_point()
+    return
   }
-  if not holding {
-    move_to nearest_control_point()
+
+  if health() < 55 {
+    shield
+    move_to nearest_enemy_control_point()
+    return
+  }
+
+  if can_attack(enemy) {
+    attack enemy
+  } else {
+    move_toward enemy.position
   }
 }
 
 on damaged {
-  shield
+  if health() < 45 {
+    shield
+  }
 }`,
   },
 
@@ -152,21 +158,111 @@ meta {
 }
 
 state {
-  mode: string = "follow"
+  retreating: boolean = false
 }
 
 on tick {
-  let ally = nearest_ally()
   let enemy = nearest_enemy()
 
-  if enemy != null and can_attack(enemy) {
+  if enemy == null {
+    move_to nearest_enemy_control_point()
+    return
+  }
+
+  if health() < 35 {
+    set retreating = true
+    retreat
+    return
+  }
+
+  set retreating = false
+
+  if can_attack(enemy) {
     attack enemy
-  } else if ally != null {
-    move_toward ally.position
   } else {
-    move_to nearest_control_point()
+    move_toward enemy.position
+  }
+}
+
+on low_health {
+  set retreating = true
+  retreat
+}`,
+  },
+
+  flanker: {
+    name: "Flanker",
+    class: "ranger",
+    source: `robot "Flanker" version "1.0"
+
+meta {
+  author: "ArenaLab"
+  class: "ranger"
+}
+
+on tick {
+  let enemy = nearest_enemy()
+  let allies = visible_allies()
+
+  if enemy == null {
+    move_to nearest_enemy_control_point()
+    return
+  }
+
+  if allies != null and enemy_count_in_range(10) > 1 {
+    strafe_right
+    return
+  }
+
+  if can_attack(enemy) {
+    attack enemy
+  } else {
+    move_toward enemy.position
   }
 }`,
+  },
+
+  sentinel: {
+    name: "Sentinel",
+    class: "tank",
+    source: `robot "Sentinel" version "1.0"
+
+meta {
+  author: "ArenaLab"
+  class: "tank"
+}
+
+on tick {
+  let enemy = nearest_enemy()
+
+  if enemy == null {
+    move_to nearest_enemy_control_point()
+    return
+  }
+
+  if health() < 65 {
+    shield
+  }
+
+  if can_attack(enemy) {
+    attack enemy
+  } else {
+    move_toward enemy.position
+  }
+}`,
+  },
+};
+
+const TEAM_PRESETS = {
+  skirmish_pair: {
+    name: "Skirmish Pair",
+    allies: ["bruiser", "healer"],
+    opponents: ["kiter", "fortress"],
+  },
+  pressure_line: {
+    name: "Pressure Line",
+    allies: ["sentinel", "flanker"],
+    opponents: ["fortress", "kiter"],
   },
 };
 
@@ -189,6 +285,9 @@ const arenaStatus = document.getElementById("arena-status");
 const matchResultsEl = document.getElementById("match-results");
 const resultsContentEl = document.getElementById("results-content");
 const opponentSelect = document.getElementById("opponent-select");
+const matchModeSelect = document.getElementById("match-mode");
+const teamPresetSelect = document.getElementById("team-preset-select");
+const btnRunTeamSim = document.getElementById("btn-run-team-sim");
 const presetButtons = document.querySelectorAll(".bot-preset");
 
 // Replay controls
@@ -214,7 +313,7 @@ let replayData = null;
 let replayPlaying = false;
 let replayFrameIndex = 0;
 let replayAnimId = null;
-let replayLabels = [];
+let replayLabels = {};
 let replaySpeed = 1;
 let lastReplayTimestamp = 0;
 
@@ -239,6 +338,7 @@ const BUILTINS = new Set([
   "nearest_enemy", "visible_enemies", "enemy_count_in_range",
   "nearest_ally", "visible_allies",
   "nearest_cover", "nearest_resource", "nearest_control_point",
+  "nearest_enemy_control_point",
   "distance_to", "line_of_sight", "current_tick",
   "can_attack",
 ]);
@@ -551,29 +651,65 @@ function doRunMatch() {
     return;
   }
 
+  const mode = matchModeSelect?.value === "squad_2v2" ? "squad_2v2" : "duel_1v1";
+  const participants = [
+    {
+      program: compiledPlayer.program,
+      constants: compiledPlayer.constants,
+      playerId: "player",
+      teamId: 0,
+    },
+  ];
+
+  if (mode === "squad_2v2") {
+    const allyPreset = BOT_PRESETS.healer;
+    const allyCompiled = compile(allyPreset.source);
+    if (!allyCompiled.success) {
+      logToConsole("Default ally failed to compile.", "error");
+      arenaStatus.textContent = "Error";
+      return;
+    }
+    participants.push({
+      program: allyCompiled.program,
+      constants: allyCompiled.constants,
+      playerId: allyPreset.name.toLowerCase(),
+      teamId: 0,
+    });
+  }
+
+  participants.push({
+    program: oppResult.program,
+    constants: oppResult.constants,
+    playerId: oppPreset.name.toLowerCase(),
+    teamId: 1,
+  });
+
+  if (mode === "squad_2v2") {
+    const enemyPartnerPreset = BOT_PRESETS.fortress;
+    const enemyPartnerCompiled = compile(enemyPartnerPreset.source);
+    if (!enemyPartnerCompiled.success) {
+      logToConsole("Enemy partner failed to compile.", "error");
+      arenaStatus.textContent = "Error";
+      return;
+    }
+    participants.push({
+      program: enemyPartnerCompiled.program,
+      constants: enemyPartnerCompiled.constants,
+      playerId: enemyPartnerPreset.name.toLowerCase(),
+      teamId: 1,
+    });
+  }
+
   const setup = {
     config: {
-      mode: "1v1_ranked",
+      mode,
       arenaWidth: ARENA_WIDTH,
       arenaHeight: ARENA_HEIGHT,
       maxTicks: 3000,
       tickRate: 30,
       seed: Math.floor(Math.random() * 100000),
     },
-    participants: [
-      {
-        program: compiledPlayer.program,
-        constants: compiledPlayer.constants,
-        playerId: "player",
-        teamId: 0,
-      },
-      {
-        program: oppResult.program,
-        constants: oppResult.constants,
-        playerId: oppPreset.name.toLowerCase(),
-        teamId: 1,
-      },
-    ],
+    participants,
   };
 
   let result;
@@ -601,6 +737,67 @@ function doRunMatch() {
   startReplay(result, oppPreset.name);
 }
 
+function doRunTeamSimulation() {
+  const teamPreset = TEAM_PRESETS[teamPresetSelect?.value ?? ""];
+  if (!teamPreset) {
+    logToConsole("Invalid team preset selection.", "error");
+    return;
+  }
+
+  const compileBot = (key) => {
+    const preset = BOT_PRESETS[key];
+    const compiled = compile(preset.source);
+    if (!compiled.success) throw new Error(`Preset ${preset.name} failed to compile.`);
+    return { preset, compiled };
+  };
+
+  let allies;
+  let opponents;
+  try {
+    allies = teamPreset.allies.map(compileBot);
+    opponents = teamPreset.opponents.map(compileBot);
+  } catch (e) {
+    logToConsole(e.message, "error");
+    arenaStatus.textContent = "Error";
+    return;
+  }
+
+  const participants = [
+    ...allies.map(({ preset, compiled }) => ({
+      program: compiled.program,
+      constants: compiled.constants,
+      playerId: `ally_${preset.name.toLowerCase()}`,
+      teamId: 0,
+    })),
+    ...opponents.map(({ preset, compiled }) => ({
+      program: compiled.program,
+      constants: compiled.constants,
+      playerId: `opp_${preset.name.toLowerCase()}`,
+      teamId: 1,
+    })),
+  ];
+
+  const setup = {
+    config: {
+      mode: "squad_2v2",
+      arenaWidth: ARENA_WIDTH,
+      arenaHeight: ARENA_HEIGHT,
+      maxTicks: 3000,
+      tickRate: 30,
+      seed: Math.floor(Math.random() * 100000),
+    },
+    participants,
+  };
+
+  const result = runMatch(setup);
+  lastMatchResult = result;
+  const opponentName = teamPreset.name;
+  logToConsole(`\n--- Team Simulation: ${teamPreset.name} ---`, "event");
+  logToConsole(`Winner: ${result.winner === null ? "DRAW" : `Team ${result.winner}`} | ${result.reason}`, "success");
+  showMatchResults(result, opponentName);
+  startReplay(result, opponentName);
+}
+
 function doCompileAndRun() {
   if (doCompile()) {
     doRunMatch();
@@ -617,28 +814,36 @@ function showMatchResults(result, opponentName) {
   const isDraw = result.winner === null;
   const winnerLabel = isDraw ? "DRAW" : result.winner === 0 ? "Your Bot WINS" : `${opponentName} WINS`;
 
-  const statsArr = [...result.robotStats.entries()];
-  const playerStats = statsArr[0] ? statsArr[0][1] : null;
-  const oppStats = statsArr[1] ? statsArr[1][1] : null;
+  const participants = result.replay.metadata?.participants ?? [];
+  const robotToTeam = new Map(participants.map((p) => [p.robotId, p.teamId]));
+  const teamTotals = new Map([[0, { hp: 0, dmg: 0, kills: 0 }], [1, { hp: 0, dmg: 0, kills: 0 }]]);
 
-  let playerHP = "?";
-  let oppHP = "?";
-  if (result.replay.frames.length > 0) {
-    const lastFrame = result.replay.frames[result.replay.frames.length - 1];
-    if (lastFrame.robots[0]) playerHP = lastFrame.robots[0].health;
-    if (lastFrame.robots[1]) oppHP = lastFrame.robots[1].health;
+  const lastFrame = result.replay.frames[result.replay.frames.length - 1];
+  if (lastFrame) {
+    for (const robot of lastFrame.robots) {
+      const teamId = robotToTeam.get(robot.id);
+      if (teamId === undefined) continue;
+      teamTotals.get(teamId).hp += Math.max(0, robot.health);
+    }
+  }
+  for (const [robotId, stats] of result.robotStats.entries()) {
+    const teamId = robotToTeam.get(robotId);
+    if (teamId === undefined) continue;
+    const bucket = teamTotals.get(teamId);
+    bucket.dmg += stats.damageDealt;
+    bucket.kills += stats.kills;
   }
 
   resultsContentEl.innerHTML = `
     <div class="result-winner ${isDraw ? 'draw' : ''}">${winnerLabel}</div>
     <div class="result-item"><span class="rl">Reason</span>${result.reason}</div>
     <div class="result-item"><span class="rl">Ticks</span>${result.tickCount}</div>
-    <div class="result-item"><span class="rl">Your HP</span>${playerHP}</div>
-    <div class="result-item"><span class="rl">Opp HP</span>${oppHP}</div>
-    ${playerStats ? `<div class="result-item"><span class="rl">Dmg Dealt</span>${playerStats.damageDealt}</div>` : ""}
-    ${oppStats ? `<div class="result-item"><span class="rl">Opp Dmg</span>${oppStats.damageDealt}</div>` : ""}
-    ${playerStats ? `<div class="result-item"><span class="rl">Kills</span>${playerStats.kills}</div>` : ""}
-    ${oppStats ? `<div class="result-item"><span class="rl">Opp Kills</span>${oppStats.kills}</div>` : ""}
+    <div class="result-item"><span class="rl">Team 0 HP</span>${teamTotals.get(0).hp}</div>
+    <div class="result-item"><span class="rl">Team 1 HP</span>${teamTotals.get(1).hp}</div>
+    <div class="result-item"><span class="rl">Team 0 Dmg</span>${teamTotals.get(0).dmg}</div>
+    <div class="result-item"><span class="rl">Team 1 Dmg</span>${teamTotals.get(1).dmg}</div>
+    <div class="result-item"><span class="rl">Team 0 Kills</span>${teamTotals.get(0).kills}</div>
+    <div class="result-item"><span class="rl">Team 1 Kills</span>${teamTotals.get(1).kills}</div>
   `;
 }
 
@@ -649,6 +854,17 @@ function showMatchResults(result, opponentName) {
 const TEAM_COLORS = ["#00d4ff", "#ff3355"];
 const TEAM_GLOW = ["rgba(0,212,255,0.25)", "rgba(255,51,85,0.25)"];
 const GRID_COLOR = "rgba(42,42,74,0.3)";
+const ARENA_CONTROL_POINTS = [
+  { x: ARENA_WIDTH * 0.20, y: ARENA_HEIGHT * 0.50 },
+  { x: ARENA_WIDTH * 0.50, y: ARENA_HEIGHT * 0.50 },
+  { x: ARENA_WIDTH * 0.80, y: ARENA_HEIGHT * 0.50 },
+];
+const ARENA_COVERS = [
+  { x: ARENA_WIDTH * 0.50, y: ARENA_HEIGHT * 0.18, w: 8, h: 18 },
+  { x: ARENA_WIDTH * 0.50, y: ARENA_HEIGHT * 0.82, w: 8, h: 18 },
+  { x: ARENA_WIDTH * 0.33, y: ARENA_HEIGHT * 0.50, w: 6, h: 10 },
+  { x: ARENA_WIDTH * 0.67, y: ARENA_HEIGHT * 0.50, w: 6, h: 10 },
+];
 
 function canvasScale() {
   return canvasEl.width / ARENA_WIDTH;
@@ -684,22 +900,35 @@ function drawArenaBackground() {
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, w - 2, h - 2);
 
-  // Center control point marker
-  const cx = w / 2;
-  const cy = h / 2;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 4 * s, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(255,221,0,0.08)";
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,221,0,0.25)";
+  // Cover walls / chokepoints
+  ctx.fillStyle = "rgba(120, 140, 190, 0.2)";
+  ctx.strokeStyle = "rgba(140, 160, 220, 0.45)";
   ctx.lineWidth = 1;
-  ctx.stroke();
+  for (const cover of ARENA_COVERS) {
+    const cw = cover.w * s;
+    const ch = cover.h * s;
+    const cx = (cover.x * s) - (cw / 2);
+    const cy = (cover.y * s) - (ch / 2);
+    ctx.fillRect(cx, cy, cw, ch);
+    ctx.strokeRect(cx, cy, cw, ch);
+  }
 
-  // CP label
+  // Control points
   ctx.fillStyle = "rgba(255,221,0,0.3)";
   ctx.font = `${Math.max(8, 2 * s)}px ${getComputedStyle(document.body).getPropertyValue('--font-sans')}`;
   ctx.textAlign = "center";
-  ctx.fillText("CP", cx, cy + 6 * s);
+  for (const cp of ARENA_CONTROL_POINTS) {
+    const cx = cp.x * s;
+    const cy = cp.y * s;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4 * s, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,221,0,0.08)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,221,0,0.25)";
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,221,0,0.3)";
+    ctx.fillText("CP", cx, cy + 6 * s);
+  }
 }
 
 function drawRobot(x, y, health, maxHealth, teamId, label, isAlive) {
@@ -775,7 +1004,7 @@ function drawFrame(frame, labels) {
     const r = frame.robots[i];
     const maxHP = CLASS_STATS[r.robotClass]?.health || 100;
     const isAlive = r.health > 0;
-    drawRobot(r.position.x, r.position.y, r.health, maxHP, r.teamId, labels[i] || r.id, isAlive);
+    drawRobot(r.position.x, r.position.y, r.health, maxHP, r.teamId, labels[r.id] || r.id, isAlive);
   }
 }
 
@@ -804,7 +1033,12 @@ function startReplay(result, opponentName) {
   }
 
   replayData = frames;
-  replayLabels = ["You", opponentName];
+  const labelsById = {};
+  for (const p of result.replay.metadata?.participants ?? []) {
+    if (p.teamId === 0 && p.playerId === "player") labelsById[p.robotId] = "You";
+    else labelsById[p.robotId] = p.playerId;
+  }
+  replayLabels = labelsById;
   replayFrameIndex = 0;
   replayPlaying = true;
   replaySpeed = parseFloat(replaySpeedSelect.value) || 1;
@@ -949,6 +1183,7 @@ btnCompile.addEventListener("click", doCompile);
 btnRun.addEventListener("click", doRunMatch);
 btnCompileRun.addEventListener("click", doCompileAndRun);
 btnClear.addEventListener("click", clearConsole);
+btnRunTeamSim?.addEventListener("click", doRunTeamSimulation);
 
 presetButtons.forEach((btn) => {
   btn.addEventListener("click", () => {

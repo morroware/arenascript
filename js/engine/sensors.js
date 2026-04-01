@@ -117,6 +117,20 @@ export function createSensorGateway(world) {
         return nearest;
       }
 
+      case "nearest_enemy_control_point": {
+        let nearestDist = Infinity;
+        let nearest = null;
+        for (const cp of world.controlPoints.values()) {
+          if (cp.owner === robot.teamId) continue;
+          const d = distance(robot.position, cp.position);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = { id: cp.id, position: { x: cp.position.x, y: cp.position.y }, owner: cp.owner };
+          }
+        }
+        return nearest;
+      }
+
       case "distance_to": {
         const target = args[0];
         if (!target) return 999;

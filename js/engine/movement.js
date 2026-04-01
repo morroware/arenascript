@@ -88,14 +88,23 @@ export function resolveMovement(world, robot, action) {
 export function applyMovement(world, robot) {
   if (!robot.alive) return;
 
+  const oldPos = robot.position;
   const newPos = add(robot.position, robot.velocity);
-  robot.position = clamp(
+  const clamped = clamp(
     newPos,
     ROBOT_RADIUS,
     ROBOT_RADIUS,
     world.config.arenaWidth - ROBOT_RADIUS,
     world.config.arenaHeight - ROBOT_RADIUS,
   );
+
+  if (isInsideCover(world, clamped)) {
+    robot.position = oldPos;
+    robot.velocity = vec2(0, 0);
+    return;
+  }
+
+  robot.position = clamped;
 }
 
 /** Resolve simple robot-robot collision (push apart) */
@@ -122,6 +131,17 @@ export function resolveCollisions(world) {
       }
     }
   }
+}
+
+function isInsideCover(world, position) {
+  for (const cover of world.covers.values()) {
+    const halfW = cover.width / 2;
+    const halfH = cover.height / 2;
+    const inX = position.x >= cover.position.x - halfW && position.x <= cover.position.x + halfW;
+    const inY = position.y >= cover.position.y - halfH && position.y <= cover.position.y + halfH;
+    if (inX && inY) return true;
+  }
+  return false;
 }
 
 /** Resolve target from action intent — could be a position, entity ID, or entity object */

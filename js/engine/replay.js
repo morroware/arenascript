@@ -20,6 +20,8 @@ export class ReplayWriter {
   captureFrame(world, events, actions) {
     const robots = [...world.robots.values()].map(r => ({
       id: r.id,
+      teamId: r.teamId,
+      robotClass: r.class,
       position: { x: r.position.x, y: r.position.y },
       health: r.health,
       energy: r.energy,
