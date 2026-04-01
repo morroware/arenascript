@@ -187,26 +187,27 @@ class LobbyManager
             return null;
         }
 
-        $p1 = $lobby['players'][0] ?? null;
-        $p2 = $lobby['players'][1] ?? null;
+        $readyPlayers = array_values(array_filter(
+            $lobby['players'],
+            fn(array $p): bool => (bool) ($p['program'] ?? null) && (bool) ($p['constants'] ?? null),
+        ));
 
-        if (!$p1 || !$p2 || !$p1['program'] || !$p2['program'] || !$p1['constants'] || !$p2['constants']) {
+        if (count($readyPlayers) < 2) {
             return null;
         }
 
         $lobby['status'] = 'in_match';
 
-        $response = $this->matchRunner->runUnrankedMatch([
-            'player1' => [
-                'playerId'  => $p1['playerId'],
-                'program'   => $p1['program'],
-                'constants' => $p1['constants'],
-            ],
-            'player2' => [
-                'playerId'  => $p2['playerId'],
-                'program'   => $p2['program'],
-                'constants' => $p2['constants'],
-            ],
+        $response = $this->matchRunner->runUnrankedMatchWithParticipants([
+            'participants' => array_map(
+                fn(array $p): array => [
+                    'playerId'  => $p['playerId'],
+                    'program'   => $p['program'],
+                    'constants' => $p['constants'],
+                    'teamId'    => $p['teamId'],
+                ],
+                $readyPlayers,
+            ),
             'config' => [
                 'mode'        => $lobby['mode'],
                 'arenaWidth'  => ARENA_WIDTH,
