@@ -5,6 +5,7 @@ import { SemanticAnalyzer } from "./semantic.js";
 import { Compiler } from "./compiler.js";
 import { compile } from "./pipeline.js";
 import { VM } from "../runtime/vm.js";
+import { runMatch } from "../engine/tick.js";
 
 function parseSource(source) {
   const tokens = new Lexer(source).tokenize();
@@ -294,6 +295,67 @@ on tick {}`;
   assert.ok(!result.success, "Should fail: unterminated string");
 }
 
+function testBotsNavigateAroundCover() {
+  const chaserA = `robot "LeftChaser" version "1.0"
+meta {
+  author: "test"
+  class: "brawler"
+}
+on tick {
+  let enemy = nearest_enemy()
+  if enemy != null {
+    if can_attack(enemy) {
+      attack enemy
+    } else {
+      move_toward enemy.position
+    }
+  } else {
+    move_to nearest_enemy_control_point()
+  }
+}`;
+
+  const chaserB = `robot "RightChaser" version "1.0"
+meta {
+  author: "test"
+  class: "ranger"
+}
+on tick {
+  let enemy = nearest_enemy()
+  if enemy != null {
+    if can_attack(enemy) {
+      attack enemy
+    } else {
+      move_toward enemy.position
+    }
+  } else {
+    move_to nearest_enemy_control_point()
+  }
+}`;
+
+  const a = compile(chaserA);
+  const b = compile(chaserB);
+  assert.ok(a.success, `Compile failed: ${a.errors.join(", ")}`);
+  assert.ok(b.success, `Compile failed: ${b.errors.join(", ")}`);
+
+  const result = runMatch({
+    config: {
+      mode: "1v1_ranked",
+      arenaWidth: 100,
+      arenaHeight: 100,
+      maxTicks: 1200,
+      tickRate: 30,
+      seed: 77,
+    },
+    participants: [
+      { program: a.program, constants: a.constants, playerId: "p1", teamId: 0 },
+      { program: b.program, constants: b.constants, playerId: "p2", teamId: 1 },
+    ],
+  });
+
+  const totalDamage = [...result.robotStats.values()].reduce((sum, stats) => sum + stats.damageDealt, 0);
+  assert.ok(totalDamage > 0, "Expected robots to navigate and engage instead of stalemating on cover");
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -316,6 +378,7 @@ function run() {
     testDuplicateStateVariable,
     testSetOnNonStateVariable,
     testUnterminatedString,
+    testBotsNavigateAroundCover,
   ];
 
   let passed = 0;
