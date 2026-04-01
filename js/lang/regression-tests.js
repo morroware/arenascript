@@ -303,23 +303,8 @@ meta {
   author: "test"
   class: "brawler"
 }
-on tick {
-  let enemy = nearest_enemy()
-  if enemy != null {
-    if can_attack(enemy) {
-      attack enemy
-    } else {
-      move_toward enemy.position
-    }
-  } else {
-    move_to nearest_enemy_control_point()
-  }
-}`;
-
-  const chaserB = `robot "RightChaser" version "1.0"
-meta {
-  author: "test"
-  class: "ranger"
+state {
+  ticks: number = 0
 }
 on tick {
   let enemy = nearest_enemy()
@@ -330,7 +315,46 @@ on tick {
       move_toward enemy.position
     }
   } else {
-    move_to nearest_enemy_control_point()
+    set ticks = ticks + 1
+    if wall_ahead(3) {
+      turn_right
+    } else {
+      move_forward
+    }
+    if ticks > 20 {
+      turn_right
+      set ticks = 0
+    }
+  }
+}`;
+
+  const chaserB = `robot "RightChaser" version "1.0"
+meta {
+  author: "test"
+  class: "ranger"
+}
+state {
+  ticks: number = 0
+}
+on tick {
+  let enemy = nearest_enemy()
+  if enemy != null {
+    if can_attack(enemy) {
+      attack enemy
+    } else {
+      move_toward enemy.position
+    }
+  } else {
+    set ticks = ticks + 1
+    if wall_ahead(3) {
+      turn_left
+    } else {
+      move_forward
+    }
+    if ticks > 20 {
+      turn_left
+      set ticks = 0
+    }
   }
 }`;
 

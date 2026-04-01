@@ -56,6 +56,17 @@ export const CAPTURE_RADIUS = 3.0;
 export const CAPTURE_WIN_THRESHOLD = 1.0;
 export const HEAL_ZONE_RADIUS = 4.0;
 export const HEAL_ZONE_TICK_RATE = 2;
+// --- Hazards ---
+export const HAZARD_ZONE_RADIUS = 3.5;
+export const HAZARD_DAMAGE_PER_TICK = 1;
+// --- Procedural Arena ---
+export const MIN_COVER_COUNT = 6;
+export const MAX_COVER_COUNT = 12;
+export const MIN_HEAL_ZONES = 2;
+export const MAX_HEAL_ZONES = 4;
+export const MIN_HAZARD_ZONES = 1;
+export const MAX_HAZARD_ZONES = 3;
+export const SPAWN_CLEAR_RADIUS = 15; // keep area around spawns clear of obstacles
 // --- Ranked ---
 export const INITIAL_ELO = 1000;
 export const ELO_K_FACTOR = 32;

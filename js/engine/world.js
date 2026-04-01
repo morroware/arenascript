@@ -4,7 +4,7 @@
 
 import { SeededRNG } from "../shared/prng.js";
 import { vec2 } from "../shared/vec2.js";
-import { ROBOT_BASE_HEALTH, ROBOT_BASE_ENERGY, CLASS_STATS } from "../shared/config.js";
+import { ROBOT_BASE_HEALTH, ROBOT_BASE_ENERGY, CLASS_STATS, HAZARD_DAMAGE_PER_TICK, HAZARD_ZONE_RADIUS } from "../shared/config.js";
 
 let nextId = 0;
 export function generateId(prefix) {
@@ -73,6 +73,11 @@ export class World {
       cooldowns: new Map(),
       memory: {
         lastSeenEnemy: null,
+        discoveredCovers: new Map(),
+        discoveredHealZones: new Map(),
+        discoveredControlPoints: new Map(),
+        discoveredHazards: new Map(),
+        spawnPosition: { x: pos.x, y: pos.y },
       },
       alive: true,
       teamId,
@@ -112,6 +117,13 @@ export class World {
     const zone = { id, position, radius, healPerTick };
     this.healingZones.set(id, zone);
     return zone;
+  }
+
+  addHazard(position, radius = HAZARD_ZONE_RADIUS, damagePerTick = HAZARD_DAMAGE_PER_TICK) {
+    const id = generateId("hazard");
+    const hazard = { id, position, radius, damagePerTick };
+    this.hazards.set(id, hazard);
+    return hazard;
   }
 
   getRobot(id) {

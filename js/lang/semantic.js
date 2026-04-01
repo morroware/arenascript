@@ -12,11 +12,14 @@ const BUILTIN_SENSORS = new Set([
   "nearest_enemy", "visible_enemies", "enemy_count_in_range",
   "nearest_ally", "visible_allies",
   "nearest_cover", "nearest_resource", "nearest_control_point",
-  "nearest_enemy_control_point", "nearest_heal_zone",
+  "nearest_enemy_control_point", "nearest_heal_zone", "nearest_hazard",
   "distance_to", "line_of_sight", "current_tick",
   "can_attack", "scan", "scan_enemies", "last_seen_enemy", "has_recent_enemy_contact",
   "enemy_visible", "random", "wall_ahead", "damage_percent",
   "team_size", "my_index", "my_role",
+  "is_in_heal_zone", "is_in_hazard",
+  "arena_width", "arena_height", "spawn_position",
+  "discovered_count",
 ]);
 
 const VALID_ACTIONS = new Set([

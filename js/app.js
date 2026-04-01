@@ -15,90 +15,176 @@ import {
 
 const BOT_PRESETS = {
   bruiser: {
-    name: "Bruiser",
+    name: "Explorer",
     class: "brawler",
-    source: `robot "Bruiser" version "1.0"
+    source: `robot "Explorer" version "2.0"
 
 meta {
-  author: "Player1"
+  author: "ArenaLab"
   class: "brawler"
 }
 
 const {
-  ENGAGE_RANGE = 8
+  HEAL_THRESHOLD = 50
+  TURN_INTERVAL = 20
 }
 
 state {
-  mode: string = "hunt"
+  ticks_moving: number = 0
+  phase: string = "scout"
 }
 
 on spawn {
-  set mode = "hunt"
+  set ticks_moving = 0
+  set phase = "scout"
 }
 
 on tick {
+  if is_in_hazard() {
+    turn_right
+    move_forward
+    return
+  }
+
   let enemy = nearest_enemy()
+
   if enemy != null {
+    set phase = "fight"
     if can_attack(enemy) {
       attack enemy
     } else {
       move_toward enemy.position
     }
-  } else {
-    move_to nearest_enemy_control_point()
+    return
   }
+
+  if health() < HEAL_THRESHOLD {
+    let heal = nearest_heal_zone()
+    if heal != null {
+      set phase = "heal"
+      move_to heal.position
+      return
+    }
+  }
+
+  set phase = "scout"
+  set ticks_moving = ticks_moving + 1
+
+  if wall_ahead(3) {
+    turn_right
+    set ticks_moving = 0
+    return
+  }
+
+  if ticks_moving > TURN_INTERVAL {
+    let dir = random(1, 3)
+    if dir == 1 {
+      turn_left
+    } else {
+      turn_right
+    }
+    set ticks_moving = 0
+    return
+  }
+
+  move_forward
 }
 
 on damaged(event) {
-  set mode = "fight"
+  if health() < 30 {
+    let heal = nearest_heal_zone()
+    if heal != null {
+      set phase = "heal"
+    }
+  }
 }`,
   },
 
   kiter: {
     name: "Kiter",
     class: "ranger",
-    source: `robot "Kiter" version "1.0"
+    source: `robot "Kiter" version "2.0"
 
 meta {
-  author: "Player2"
+  author: "ArenaLab"
   class: "ranger"
 }
 
 const {
-  SAFE_HEALTH = 30
-  ATTACK_RANGE = 7
+  SAFE_HEALTH = 40
+  KITE_RANGE = 6
 }
 
 state {
-  target_id: id? = null
   retreating: boolean = false
+  strafing_dir: number = 1
 }
 
 on spawn {
   set retreating = false
+  set strafing_dir = 1
 }
 
 on tick {
+  if is_in_hazard() {
+    move_forward
+    return
+  }
+
   let enemy = nearest_enemy()
 
   if enemy == null {
-    move_to nearest_enemy_control_point()
+    set retreating = false
+    let cp = nearest_control_point()
+    if cp != null {
+      move_to cp.position
+    } else {
+      if wall_ahead(4) {
+        turn_right
+      } else {
+        move_forward
+      }
+    }
     return
   }
 
   if health() < SAFE_HEALTH {
     set retreating = true
+    let heal = nearest_heal_zone()
+    if heal != null {
+      move_to heal.position
+      return
+    }
     retreat
     return
   }
 
   set retreating = false
 
+  let dist = distance_to(enemy.position)
+
+  if dist < KITE_RANGE {
+    if can_attack(enemy) {
+      fire_at enemy.position
+    }
+    retreat
+    return
+  }
+
   if can_attack(enemy) {
-    attack enemy
+    fire_at enemy.position
+    if strafing_dir > 0 {
+      strafe_right
+    } else {
+      strafe_left
+    }
   } else {
     move_toward enemy.position
   }
+}
+
+on damaged {
+  set strafing_dir = strafing_dir * -1
 }
 
 on low_health {
@@ -109,34 +195,79 @@ on low_health {
   fortress: {
     name: "Fortress",
     class: "tank",
-    source: `robot "Fortress" version "1.0"
+    source: `robot "Fortress" version "2.0"
 
 meta {
-  author: "Player3"
+  author: "ArenaLab"
   class: "tank"
 }
 
+const {
+  HOLD_THRESHOLD = 80
+  SHIELD_THRESHOLD = 60
+}
+
+state {
+  has_position: boolean = false
+}
+
 on spawn {
-  move_to nearest_enemy_control_point()
+  set has_position = false
 }
 
 on tick {
-  let enemy = nearest_enemy()
-  if enemy == null {
-    move_to nearest_enemy_control_point()
+  if is_in_hazard() {
+    move_forward
     return
   }
 
-  if health() < 55 {
+  if not has_position {
+    let cp = nearest_control_point()
+    if cp != null {
+      move_to cp.position
+      if distance_to(cp.position) < 4 {
+        set has_position = true
+      }
+      return
+    }
+    if wall_ahead(3) {
+      turn_left
+    } else {
+      move_forward
+    }
+    return
+  }
+
+  if health() < SHIELD_THRESHOLD {
     shield
-    move_to nearest_enemy_control_point()
+  }
+
+  let enemy = nearest_enemy()
+  if enemy != null {
+    if can_attack(enemy) {
+      attack enemy
+    } else {
+      let dist = distance_to(enemy.position)
+      if dist < 12 {
+        move_toward enemy.position
+      }
+    }
     return
   }
 
-  if can_attack(enemy) {
-    attack enemy
-  } else {
-    move_toward enemy.position
+  if health() < HOLD_THRESHOLD {
+    let heal = nearest_heal_zone()
+    if heal != null {
+      set has_position = false
+      move_to heal.position
+      return
+    }
+  }
+
+  let cp = nearest_enemy_control_point()
+  if cp != null {
+    set has_position = false
+    move_to cp.position
   }
 }
 
@@ -148,119 +279,310 @@ on damaged {
   },
 
   healer: {
-    name: "Healer",
+    name: "Survivor",
     class: "support",
-    source: `robot "Healer" version "1.0"
+    source: `robot "Survivor" version "2.0"
 
 meta {
-  author: "Player4"
+  author: "ArenaLab"
   class: "support"
 }
 
+const {
+  FLEE_HEALTH = 45
+  SAFE_HEALTH = 70
+}
+
 state {
-  retreating: boolean = false
+  healing: boolean = false
+}
+
+fn find_safety() {
+  let heal = nearest_heal_zone()
+  if heal != null {
+    move_to heal.position
+    return
+  }
+  let cover = nearest_cover()
+  if cover != null {
+    move_to cover
+  } else {
+    retreat
+  }
 }
 
 on tick {
+  if is_in_hazard() {
+    move_forward
+    return
+  }
+
+  if is_in_heal_zone() and health() < max_health() {
+    set healing = true
+    let enemy = nearest_enemy()
+    if enemy != null and can_attack(enemy) {
+      attack enemy
+    }
+    stop
+    return
+  }
+
+  set healing = false
+
+  if health() < FLEE_HEALTH {
+    find_safety()
+    return
+  }
+
   let enemy = nearest_enemy()
 
-  if enemy == null {
-    move_to nearest_enemy_control_point()
+  if enemy != null {
+    if can_attack(enemy) {
+      attack enemy
+    } else {
+      let dist = distance_to(enemy.position)
+      if dist < 10 and health() < SAFE_HEALTH {
+        find_safety()
+      } else {
+        move_toward enemy.position
+      }
+    }
     return
   }
 
-  if health() < 35 {
-    set retreating = true
-    retreat
-    return
-  }
-
-  set retreating = false
-
-  if can_attack(enemy) {
-    attack enemy
+  let cp = nearest_control_point()
+  if cp != null {
+    move_to cp.position
   } else {
-    move_toward enemy.position
+    if wall_ahead(3) {
+      turn_right
+    } else {
+      move_forward
+    }
   }
 }
 
 on low_health {
-  set retreating = true
-  retreat
+  find_safety()
+}
+
+on damaged {
+  if health() < FLEE_HEALTH {
+    find_safety()
+  }
 }`,
   },
 
   flanker: {
     name: "Flanker",
     class: "ranger",
-    source: `robot "Flanker" version "1.0"
+    source: `robot "Flanker" version "2.0"
 
 meta {
   author: "ArenaLab"
   class: "ranger"
 }
 
-on tick {
-  let enemy = nearest_enemy()
-  let allies = visible_allies()
+const {
+  FLANK_OFFSET = 20
+  ENGAGE_HEALTH = 35
+}
 
+state {
+  flanking: boolean = true
+  sweep_angle: number = 0
+}
+
+fn get_flank_position() {
+  let enemy = nearest_enemy()
   if enemy == null {
-    move_to nearest_enemy_control_point()
+    return null
+  }
+  let ex = enemy.position.x
+  let ey = enemy.position.y
+  let w = arena_width()
+  let h = arena_height()
+  if ex < w / 2 {
+    return enemy.position
+  }
+  return enemy.position
+}
+
+on spawn {
+  set flanking = true
+  set sweep_angle = 0
+}
+
+on tick {
+  if is_in_hazard() {
+    strafe_left
     return
   }
 
-  if allies != null and enemy_count_in_range(10) > 1 {
+  let enemy = nearest_enemy()
+
+  if enemy == null {
+    set sweep_angle = sweep_angle + 1
+    if wall_ahead(4) {
+      turn_right
+      turn_right
+    } else {
+      move_forward
+    }
+
+    if sweep_angle > 15 {
+      turn_right
+      set sweep_angle = 0
+    }
+    return
+  }
+
+  if health() < ENGAGE_HEALTH {
+    let heal = nearest_heal_zone()
+    if heal != null {
+      move_to heal.position
+      return
+    }
+    retreat
+    return
+  }
+
+  let dist = distance_to(enemy.position)
+
+  if dist > 10 and flanking {
+    if wall_ahead(3) {
+      turn_left
+    }
     strafe_right
     return
   }
 
+  set flanking = false
+
   if can_attack(enemy) {
-    attack enemy
+    fire_at enemy.position
+    strafe_right
   } else {
     move_toward enemy.position
   }
+}
+
+on enemy_seen {
+  set flanking = true
+  set sweep_angle = 0
+}
+
+on damaged {
+  set flanking = false
 }`,
   },
 
   sentinel: {
     name: "Sentinel",
     class: "tank",
-    source: `robot "Sentinel" version "1.0"
+    source: `robot "Sentinel" version "2.0"
 
 meta {
   author: "ArenaLab"
   class: "tank"
 }
 
-on tick {
-  let enemy = nearest_enemy()
+const {
+  PATROL_WAIT = 30
+  ENGAGE_RANGE = 8
+}
 
-  if enemy == null {
-    move_to nearest_enemy_control_point()
+state {
+  wait_timer: number = 0
+  patrolling: boolean = true
+}
+
+fn patrol() {
+  if wall_ahead(3) {
+    turn_right
     return
   }
 
-  if health() < 65 {
-    shield
+  let cp = nearest_control_point()
+  if cp != null {
+    if distance_to(cp.position) < 4 {
+      set wait_timer = wait_timer + 1
+      if wait_timer > PATROL_WAIT {
+        set wait_timer = 0
+        turn_right
+        turn_right
+        turn_right
+      }
+      stop
+      return
+    }
+    move_to cp.position
+    return
   }
+
+  move_forward
+}
+
+on tick {
+  if is_in_hazard() {
+    move_backward
+    return
+  }
+
+  if health() < 40 {
+    shield
+    let heal = nearest_heal_zone()
+    if heal != null {
+      move_to heal.position
+      return
+    }
+  }
+
+  let enemy = nearest_enemy()
+
+  if enemy == null {
+    set patrolling = true
+    patrol()
+    return
+  }
+
+  set patrolling = false
+  set wait_timer = 0
 
   if can_attack(enemy) {
     attack enemy
   } else {
-    move_toward enemy.position
+    let dist = distance_to(enemy.position)
+    if dist < ENGAGE_RANGE {
+      move_toward enemy.position
+    } else {
+      if health() < 65 {
+        shield
+        stop
+      } else {
+        move_toward enemy.position
+      }
+    }
   }
+}
+
+on damaged {
+  if health() < 50 {
+    shield
+  }
+  set patrolling = false
 }`,
   },
 };
 
 const TEAM_PRESETS = {
   skirmish_pair: {
-    name: "Skirmish Pair",
+    name: "Scout & Survive",
     allies: ["bruiser", "healer"],
     opponents: ["kiter", "fortress"],
   },
   pressure_line: {
-    name: "Pressure Line",
+    name: "Patrol & Flank",
     allies: ["sentinel", "flanker"],
     opponents: ["fortress", "kiter"],
   },
@@ -877,17 +1199,13 @@ function showMatchResults(result, opponentName) {
 const TEAM_COLORS = ["#00d4ff", "#ff3355"];
 const TEAM_GLOW = ["rgba(0,212,255,0.25)", "rgba(255,51,85,0.25)"];
 const GRID_COLOR = "rgba(42,42,74,0.3)";
-const ARENA_CONTROL_POINTS = [
-  { x: ARENA_WIDTH * 0.20, y: ARENA_HEIGHT * 0.50 },
-  { x: ARENA_WIDTH * 0.50, y: ARENA_HEIGHT * 0.50 },
-  { x: ARENA_WIDTH * 0.80, y: ARENA_HEIGHT * 0.50 },
-];
-const ARENA_COVERS = [
-  { x: ARENA_WIDTH * 0.50, y: ARENA_HEIGHT * 0.18, w: 8, h: 18 },
-  { x: ARENA_WIDTH * 0.50, y: ARENA_HEIGHT * 0.82, w: 8, h: 18 },
-  { x: ARENA_WIDTH * 0.33, y: ARENA_HEIGHT * 0.50, w: 6, h: 10 },
-  { x: ARENA_WIDTH * 0.67, y: ARENA_HEIGHT * 0.50, w: 6, h: 10 },
-];
+// Dynamic arena layout — populated from replay metadata after each match
+let currentArenaLayout = {
+  covers: [],
+  controlPoints: [],
+  healingZones: [],
+  hazards: [],
+};
 
 function canvasScale() {
   return canvasEl.width / ARENA_WIDTH;
@@ -923,11 +1241,47 @@ function drawArenaBackground() {
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, w - 2, h - 2);
 
-  // Cover walls / chokepoints
+  // Hazard zones (draw first, behind everything)
+  for (const hz of currentArenaLayout.hazards) {
+    const cx = hz.x * s;
+    const cy = hz.y * s;
+    const r = hz.radius * s;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,51,51,0.08)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,51,51,0.25)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(255,51,51,0.25)";
+    ctx.font = `${Math.max(7, 1.8 * s)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("HAZARD", cx, cy + 1.5 * s);
+  }
+
+  // Healing zones
+  for (const zone of currentArenaLayout.healingZones) {
+    const cx = zone.x * s;
+    const cy = zone.y * s;
+    const r = zone.radius * s;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,255,136,0.07)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,255,136,0.25)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,255,136,0.3)";
+    ctx.font = `${Math.max(7, 1.8 * s)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("+HP", cx, cy + 1.5 * s);
+  }
+
+  // Cover walls / obstacles
   ctx.fillStyle = "rgba(120, 140, 190, 0.2)";
   ctx.strokeStyle = "rgba(140, 160, 220, 0.45)";
   ctx.lineWidth = 1;
-  for (const cover of ARENA_COVERS) {
+  for (const cover of currentArenaLayout.covers) {
     const cw = cover.w * s;
     const ch = cover.h * s;
     const cx = (cover.x * s) - (cw / 2);
@@ -940,7 +1294,7 @@ function drawArenaBackground() {
   ctx.fillStyle = "rgba(255,221,0,0.3)";
   ctx.font = `${Math.max(8, 2 * s)}px ${getComputedStyle(document.body).getPropertyValue('--font-sans')}`;
   ctx.textAlign = "center";
-  for (const cp of ARENA_CONTROL_POINTS) {
+  for (const cp of currentArenaLayout.controlPoints) {
     const cx = cp.x * s;
     const cy = cp.y * s;
     ctx.beginPath();
@@ -1091,6 +1445,12 @@ function drawIdle() {
 
 function startReplay(result, opponentName) {
   stopReplay();
+
+  // Load the procedural arena layout from replay metadata
+  const layout = result.replay.metadata?.arenaLayout;
+  if (layout) {
+    currentArenaLayout = layout;
+  }
 
   const frames = result.replay.frames;
   if (frames.length === 0) {

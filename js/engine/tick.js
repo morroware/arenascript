@@ -10,7 +10,15 @@ import { resolveMovement, applyMovement, resolveCollisions } from "./movement.js
 import { resolveCombat, updateProjectiles, updateCooldowns, applyDamage } from "./combat.js";
 import { VisibilityTracker, checkCooldownReady } from "./events.js";
 import { ReplayWriter } from "./replay.js";
-import { CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS, HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE } from "../shared/config.js";
+import {
+  CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS,
+  HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE,
+  HAZARD_ZONE_RADIUS, HAZARD_DAMAGE_PER_TICK,
+  MIN_COVER_COUNT, MAX_COVER_COUNT,
+  MIN_HEAL_ZONES, MAX_HEAL_ZONES,
+  MIN_HAZARD_ZONES, MAX_HAZARD_ZONES,
+  SPAWN_CLEAR_RADIUS, CLASS_STATS, DEFAULT_VISION_RANGE,
+} from "../shared/config.js";
 import { distance, vec2 } from "../shared/vec2.js";
 
 /**
@@ -80,9 +88,10 @@ export function runMatch(setup) {
     }
   }
 
-  // Create replay writer
+  // Create replay writer and capture the procedural arena layout
   const matchId = `match_${config.seed}_${Date.now()}`;
   const replayWriter = new ReplayWriter(matchId, config.seed, matchParticipants);
+  replayWriter.captureArenaLayout(world);
 
   // Execute spawn handlers
   for (const [robotId, vm] of robotVMs) {
@@ -166,9 +175,13 @@ export function runMatch(setup) {
       }
     }
 
-    // Phase 8: Apply damage/effects (projectiles)
+    // Phase 8: Apply damage/effects (projectiles, zones)
     updateProjectiles(world);
     applyHealingZones(world);
+    applyHazardZones(world);
+
+    // Phase 8b: Update robot discovery memory for nearby map features
+    updateDiscovery(world);
 
     // Update capture points
     for (const cp of world.controlPoints.values()) {
@@ -270,35 +283,120 @@ export function runMatch(setup) {
 
 function initializeArenaLayout(world) {
   const { arenaWidth: w, arenaHeight: h } = world.config;
+  const rng = world.rng;
 
-  // Multi-point objective map: encourages rotation instead of center camping.
-  world.addControlPoint(vec2(w * 0.20, h * 0.50), CAPTURE_RADIUS);
-  world.addControlPoint(vec2(w * 0.50, h * 0.50), CAPTURE_RADIUS);
-  world.addControlPoint(vec2(w * 0.80, h * 0.50), CAPTURE_RADIUS);
+  // Spawn zones to keep clear
+  const spawnZones = [
+    vec2(w * 0.10, h * 0.50), // team 0
+    vec2(w * 0.90, h * 0.50), // team 1
+  ];
 
-  // Central wall with two pass-through lanes creates meaningful chokepoints.
-  world.addCover(vec2(w * 0.50, h * 0.18), 8, 18);
-  world.addCover(vec2(w * 0.50, h * 0.82), 8, 18);
-
-  // Side anchors for flank-vs-mid decision making.
-  world.addCover(vec2(w * 0.33, h * 0.50), 6, 10);
-  world.addCover(vec2(w * 0.67, h * 0.50), 6, 10);
-
-  // Larger arenas get additional seeded terrain and sustain objectives.
-  if (w >= 120 || h >= 120) {
-    for (let i = 0; i < 2; i++) {
-      const x = i === 0
-        ? world.rng.nextFloat(w * 0.18, w * 0.35)
-        : world.rng.nextFloat(w * 0.65, w * 0.82);
-      const y = world.rng.nextFloat(h * 0.28, h * 0.72);
-      const width = world.rng.nextFloat(3, 7);
-      const height = world.rng.nextFloat(3, 7);
-      world.addCover(vec2(x, y), width, height);
+  function isTooCloseToSpawn(pos) {
+    for (const sp of spawnZones) {
+      if (distance(pos, sp) < SPAWN_CLEAR_RADIUS) return true;
     }
+    return false;
+  }
 
-    // Risk/reward sustain zones pull teams into dynamic map control choices.
-    world.addHealingZone(vec2(w * 0.25, h * 0.25), HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE);
-    world.addHealingZone(vec2(w * 0.75, h * 0.75), HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE);
+  function isTooCloseToExisting(pos, minDist, collection) {
+    for (const item of collection.values()) {
+      if (distance(pos, item.position) < minDist) return true;
+    }
+    return false;
+  }
+
+  // --- Control Points (2-3, spread across the map) ---
+  const cpCount = 2 + Math.floor(rng.nextFloat(0, 2));
+  const cpSlots = [];
+  // Divide map into horizontal slices for control points to ensure spread
+  for (let i = 0; i < cpCount; i++) {
+    const sliceWidth = w / cpCount;
+    const minX = sliceWidth * i + sliceWidth * 0.2;
+    const maxX = sliceWidth * (i + 1) - sliceWidth * 0.2;
+    const x = rng.nextFloat(Math.max(12, minX), Math.min(w - 12, maxX));
+    const y = rng.nextFloat(h * 0.25, h * 0.75);
+    const pos = vec2(x, y);
+    if (!isTooCloseToSpawn(pos)) {
+      world.addControlPoint(pos, CAPTURE_RADIUS);
+      cpSlots.push(pos);
+    }
+  }
+  // Always ensure at least one center-ish control point
+  if (cpSlots.length === 0) {
+    const pos = vec2(w * 0.5, h * 0.5);
+    world.addControlPoint(pos, CAPTURE_RADIUS);
+    cpSlots.push(pos);
+  }
+
+  // --- Cover Objects (procedurally placed, varied sizes) ---
+  const coverCount = MIN_COVER_COUNT + Math.floor(rng.nextFloat(0, MAX_COVER_COUNT - MIN_COVER_COUNT + 1));
+  for (let i = 0; i < coverCount; i++) {
+    // Try up to 10 times to place without overlapping spawn zones
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const x = rng.nextFloat(8, w - 8);
+      const y = rng.nextFloat(8, h - 8);
+      const pos = vec2(x, y);
+      if (isTooCloseToSpawn(pos)) continue;
+      if (isTooCloseToExisting(pos, 8, world.covers)) continue;
+
+      // Varied shapes: narrow walls, wide barricades, pillars
+      const shapeRoll = rng.nextFloat(0, 1);
+      let cw, ch;
+      if (shapeRoll < 0.3) {
+        // Tall wall
+        cw = rng.nextFloat(2, 4);
+        ch = rng.nextFloat(8, 16);
+      } else if (shapeRoll < 0.6) {
+        // Wide barricade
+        cw = rng.nextFloat(8, 14);
+        ch = rng.nextFloat(2, 4);
+      } else if (shapeRoll < 0.85) {
+        // Medium block
+        cw = rng.nextFloat(4, 8);
+        ch = rng.nextFloat(4, 8);
+      } else {
+        // Pillar
+        cw = rng.nextFloat(2, 4);
+        ch = rng.nextFloat(2, 4);
+      }
+
+      world.addCover(pos, cw, ch);
+      break;
+    }
+  }
+
+  // --- Healing Zones (scattered, never near spawns) ---
+  const healCount = MIN_HEAL_ZONES + Math.floor(rng.nextFloat(0, MAX_HEAL_ZONES - MIN_HEAL_ZONES + 1));
+  for (let i = 0; i < healCount; i++) {
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const x = rng.nextFloat(12, w - 12);
+      const y = rng.nextFloat(12, h - 12);
+      const pos = vec2(x, y);
+      if (isTooCloseToSpawn(pos)) continue;
+      if (isTooCloseToExisting(pos, 12, world.healingZones)) continue;
+
+      const radius = rng.nextFloat(HEAL_ZONE_RADIUS * 0.7, HEAL_ZONE_RADIUS * 1.3);
+      world.addHealingZone(pos, radius, HEAL_ZONE_TICK_RATE);
+      break;
+    }
+  }
+
+  // --- Hazard Zones (dangerous areas to avoid or navigate around) ---
+  const hazardCount = MIN_HAZARD_ZONES + Math.floor(rng.nextFloat(0, MAX_HAZARD_ZONES - MIN_HAZARD_ZONES + 1));
+  for (let i = 0; i < hazardCount; i++) {
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const x = rng.nextFloat(15, w - 15);
+      const y = rng.nextFloat(15, h - 15);
+      const pos = vec2(x, y);
+      if (isTooCloseToSpawn(pos)) continue;
+      if (isTooCloseToExisting(pos, 10, world.hazards)) continue;
+      // Don't overlap healing zones
+      if (isTooCloseToExisting(pos, 8, world.healingZones)) continue;
+
+      const radius = rng.nextFloat(HAZARD_ZONE_RADIUS * 0.8, HAZARD_ZONE_RADIUS * 1.4);
+      world.addHazard(pos, radius, HAZARD_DAMAGE_PER_TICK);
+      break;
+    }
   }
 }
 
@@ -307,6 +405,64 @@ function applyHealingZones(world) {
     for (const robot of world.getAliveRobots()) {
       if (distance(robot.position, zone.position) <= zone.radius) {
         robot.health = Math.min(robot.maxHealth, robot.health + zone.healPerTick);
+      }
+    }
+  }
+}
+
+function applyHazardZones(world) {
+  for (const hazard of world.hazards.values()) {
+    for (const robot of world.getAliveRobots()) {
+      if (distance(robot.position, hazard.position) <= hazard.radius) {
+        applyDamage(world, robot, hazard.damagePerTick, "hazard");
+      }
+    }
+  }
+}
+
+/** Update each robot's discovery memory with nearby map features */
+function updateDiscovery(world) {
+  for (const robot of world.getAliveRobots()) {
+    const visionRange = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
+
+    for (const cover of world.covers.values()) {
+      if (distance(robot.position, cover.position) <= visionRange) {
+        robot.memory.discoveredCovers.set(cover.id, {
+          id: cover.id,
+          position: { x: cover.position.x, y: cover.position.y },
+          width: cover.width,
+          height: cover.height,
+        });
+      }
+    }
+
+    for (const zone of world.healingZones.values()) {
+      if (distance(robot.position, zone.position) <= visionRange) {
+        robot.memory.discoveredHealZones.set(zone.id, {
+          id: zone.id,
+          position: { x: zone.position.x, y: zone.position.y },
+          radius: zone.radius,
+        });
+      }
+    }
+
+    for (const cp of world.controlPoints.values()) {
+      if (distance(robot.position, cp.position) <= visionRange) {
+        robot.memory.discoveredControlPoints.set(cp.id, {
+          id: cp.id,
+          position: { x: cp.position.x, y: cp.position.y },
+          owner: cp.owner,
+        });
+      }
+    }
+
+    for (const hazard of world.hazards.values()) {
+      if (distance(robot.position, hazard.position) <= visionRange) {
+        robot.memory.discoveredHazards.set(hazard.id, {
+          id: hazard.id,
+          position: { x: hazard.position.x, y: hazard.position.y },
+          radius: hazard.radius,
+        });
       }
     }
   }

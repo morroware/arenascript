@@ -9,6 +9,7 @@ import {
   ACTIVE_SCAN_RANGE,
   ATTACK_RANGE,
   CLASS_STATS,
+  DEFAULT_VISION_RANGE,
 } from "../shared/config.js";
 
 /** Convert a RobotState to a safe VM-visible object */
@@ -136,11 +137,12 @@ export function createSensorGateway(world) {
         return allies.map(robotToSensorView);
       }
 
-      // --- Arena Sensors ---
+      // --- Arena Sensors (discovery-based: only returns features the robot has seen) ---
       case "nearest_cover": {
         let nearestDist = Infinity;
         let nearest = null;
-        for (const cover of world.covers.values()) {
+        // Only search discovered covers
+        for (const cover of robot.memory.discoveredCovers.values()) {
           const d = distance(robot.position, cover.position);
           if (d < nearestDist) {
             nearestDist = d;
@@ -166,11 +168,14 @@ export function createSensorGateway(world) {
       case "nearest_control_point": {
         let nearestDist = Infinity;
         let nearest = null;
-        for (const cp of world.controlPoints.values()) {
-          const d = distance(robot.position, cp.position);
+        // Only search discovered control points; update owner from live data if still visible
+        for (const mem of robot.memory.discoveredControlPoints.values()) {
+          const liveCp = world.controlPoints.get(mem.id);
+          const owner = liveCp ? liveCp.owner : mem.owner;
+          const d = distance(robot.position, mem.position);
           if (d < nearestDist) {
             nearestDist = d;
-            nearest = { id: cp.id, position: { x: cp.position.x, y: cp.position.y }, owner: cp.owner };
+            nearest = { id: mem.id, position: { x: mem.position.x, y: mem.position.y }, owner };
           }
         }
         return nearest;
@@ -179,12 +184,14 @@ export function createSensorGateway(world) {
       case "nearest_enemy_control_point": {
         let nearestDist = Infinity;
         let nearest = null;
-        for (const cp of world.controlPoints.values()) {
-          if (cp.owner === robot.teamId) continue;
-          const d = distance(robot.position, cp.position);
+        for (const mem of robot.memory.discoveredControlPoints.values()) {
+          const liveCp = world.controlPoints.get(mem.id);
+          const owner = liveCp ? liveCp.owner : mem.owner;
+          if (owner === robot.teamId) continue;
+          const d = distance(robot.position, mem.position);
           if (d < nearestDist) {
             nearestDist = d;
-            nearest = { id: cp.id, position: { x: cp.position.x, y: cp.position.y }, owner: cp.owner };
+            nearest = { id: mem.id, position: { x: mem.position.x, y: mem.position.y }, owner };
           }
         }
         return nearest;
@@ -193,7 +200,8 @@ export function createSensorGateway(world) {
       case "nearest_heal_zone": {
         let nearestDist = Infinity;
         let nearest = null;
-        for (const zone of world.healingZones.values()) {
+        // Only search discovered healing zones
+        for (const zone of robot.memory.discoveredHealZones.values()) {
           const d = distance(robot.position, zone.position);
           if (d < nearestDist) {
             nearestDist = d;
@@ -201,6 +209,55 @@ export function createSensorGateway(world) {
           }
         }
         return nearest;
+      }
+
+      case "nearest_hazard": {
+        let nearestDist = Infinity;
+        let nearest = null;
+        for (const hazard of robot.memory.discoveredHazards.values()) {
+          const d = distance(robot.position, hazard.position);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = { id: hazard.id, position: { x: hazard.position.x, y: hazard.position.y }, radius: hazard.radius };
+          }
+        }
+        return nearest;
+      }
+
+      // --- Proprioceptive Arena Sensors (always work, no discovery needed) ---
+      case "is_in_heal_zone": {
+        for (const zone of world.healingZones.values()) {
+          if (distance(robot.position, zone.position) <= zone.radius) return true;
+        }
+        return false;
+      }
+
+      case "is_in_hazard": {
+        for (const hazard of world.hazards.values()) {
+          if (distance(robot.position, hazard.position) <= hazard.radius) return true;
+        }
+        return false;
+      }
+
+      case "arena_width":
+        return world.config.arenaWidth;
+
+      case "arena_height":
+        return world.config.arenaHeight;
+
+      case "spawn_position":
+        return { x: robot.memory.spawnPosition.x, y: robot.memory.spawnPosition.y };
+
+      case "discovered_count": {
+        const category = args[0] ?? "all";
+        if (category === "cover") return robot.memory.discoveredCovers.size;
+        if (category === "heal") return robot.memory.discoveredHealZones.size;
+        if (category === "hazard") return robot.memory.discoveredHazards.size;
+        if (category === "control") return robot.memory.discoveredControlPoints.size;
+        return robot.memory.discoveredCovers.size +
+               robot.memory.discoveredHealZones.size +
+               robot.memory.discoveredHazards.size +
+               robot.memory.discoveredControlPoints.size;
       }
 
       case "distance_to": {
