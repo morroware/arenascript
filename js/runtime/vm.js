@@ -4,6 +4,7 @@
 
 import { Op } from "./opcodes.js";
 import { ExecutionBudget, BudgetExceededError } from "./budget.js";
+import { BUDGET_INSTRUCTIONS } from "../shared/config.js";
 
 export class VM {
   static MAX_STACK_DEPTH = 1024;
@@ -60,6 +61,7 @@ export class VM {
   run() {
     let budgetExceeded = false;
     let error;
+    const _budgetStart = this.budget.instructions;
 
     try {
       while (this.ip < this.bytecode.length) {
@@ -207,7 +209,7 @@ export class VM {
               this.ip = frame.returnAddress;
               this.localBase = frame.localBase;
             } else {
-              return { actions: this.actions, budgetExceeded: false };
+              return { actions: this.actions, budgetExceeded: false, instructionsUsed: _budgetStart - this.budget.instructions };
             }
             break;
           }
@@ -222,7 +224,7 @@ export class VM {
             } else {
               // At top-level (event handler) — return with value
               this.push(val);
-              return { actions: this.actions, budgetExceeded: false };
+              return { actions: this.actions, budgetExceeded: false, instructionsUsed: _budgetStart - this.budget.instructions };
             }
             break;
           }
@@ -315,10 +317,10 @@ export class VM {
           case Op.DUP: { const v = this.peek(); this.push(v); break; }
 
           case Op.HALT:
-            return { actions: this.actions, budgetExceeded: false };
+            return { actions: this.actions, budgetExceeded: false, instructionsUsed: _budgetStart - this.budget.instructions };
 
           default:
-            return { actions: this.actions, budgetExceeded: false, error: `Unknown opcode: 0x${op.toString(16)}` };
+            return { actions: this.actions, budgetExceeded: false, instructionsUsed: _budgetStart - this.budget.instructions, error: `Unknown opcode: 0x${op.toString(16)}` };
         }
       }
     } catch (e) {
@@ -329,7 +331,7 @@ export class VM {
       }
     }
 
-    return { actions: this.actions, budgetExceeded, error };
+    return { actions: this.actions, budgetExceeded, instructionsUsed: _budgetStart - this.budget.instructions, error };
   }
 
   // --- Stack helpers ---
