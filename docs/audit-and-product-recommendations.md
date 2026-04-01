@@ -2,21 +2,26 @@
 
 ## Executive Summary
 
-This audit reviewed the compiler/runtime, simulation engine, server orchestration layer, and front-end integration. The language and engine core are already in good shape and include a meaningful regression suite. The highest-impact issues identified were in the PHP multiplayer orchestration path, where lobby modes with more than two participants could silently execute as two-player matches or be mislabeled.
+This is a living engineering audit for ArenaScript (compiler/runtime, simulation engine, multiplayer orchestration, and product UX).
 
-### Bugs fixed in this pass
+Current status:
+- Core compiler/runtime/engine behavior is covered by a regression suite and deterministic replay checks.
+- Multiplayer orchestration now supports multi-participant unranked starts through `runUnrankedMatchWithParticipants`.
+- Match setup validation is centralized in `js/shared/validation.js` and now rejects non-finite arena dimensions (`NaN`, `Infinity`) to prevent malformed configs from reaching engine code.
 
-1. **Unranked match mode coercion bug (PHP):**
-   - `runUnrankedMatch` always forced `mode = 1v1_unranked`, even for `2v2` / `ffa` requests.
-   - Impact: metadata/config mismatch and incorrect mode propagation.
+### Recently addressed defects
 
-2. **Lobby participant truncation bug (PHP):**
-   - `startMatch` only passed the first two players to the runner, even when lobby mode allowed 4+ players.
-   - Impact: dropped players at match start, invalid results for 2v2/FFA.
+1. **Unranked mode coercion (PHP) — resolved**
+   - `runUnrankedMatch` no longer rewrites non-ranked modes incorrectly.
 
-3. **Matchmaking fairness gap (PHP):**
-   - Elo acceptance window only used player 1's queue wait time.
-   - Impact: players who waited longer but were compared as player 2 could be matched later than intended.
+2. **Lobby participant truncation (PHP) — resolved**
+   - Lobby starts can pass all ready players into unranked participant-aware runner path.
+
+3. **Queue fairness asymmetry (PHP) — resolved**
+   - Match window now considers both players' queue wait expansion.
+
+4. **Non-finite arena dimension acceptance (JS validation) — resolved**
+   - `validateMatchConfig` now enforces finite positive `arenaWidth` / `arenaHeight`.
 
 ## Architectural Observations
 
@@ -111,4 +116,3 @@ Current UX can be meaningfully improved with a "builder + IDE + arena" model:
 3. **Add Battle Viewer route + replay diagnostics overlays**.
 4. **Expand language ergonomics and debugging primitives**.
 5. **Invest in ranked/live-service visibility tooling**.
-

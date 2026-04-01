@@ -817,6 +817,17 @@ function testValidateMatchConfigRejectsBadSeed() {
   assert.ok(result.errors.some(e => e.includes("seed")));
 }
 
+function testValidateMatchConfigRejectsNonFiniteArenaSize() {
+  const config = {
+    mode: "1v1_ranked", arenaWidth: Number.NaN, arenaHeight: Number.POSITIVE_INFINITY,
+    maxTicks: 3000, tickRate: 30, seed: 42,
+  };
+  const result = validateMatchConfig(config);
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some(e => e.includes("arenaWidth")));
+  assert.ok(result.errors.some(e => e.includes("arenaHeight")));
+}
+
 function testValidateParticipantRejectsMissingFields() {
   const result = validateParticipant({ playerId: "", teamId: -1 });
   assert.ok(!result.valid);
@@ -1047,6 +1058,7 @@ function run() {
     testValidateParticipantCountInvalid,
     testValidateMatchConfigValid,
     testValidateMatchConfigRejectsBadSeed,
+    testValidateMatchConfigRejectsNonFiniteArenaSize,
     testValidateParticipantRejectsMissingFields,
     testValidateMatchRequestFullValid,
     // Replay bookmarks

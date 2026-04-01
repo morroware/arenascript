@@ -83,12 +83,12 @@ export function validateMatchConfig(config) {
   }
 
   // arenaWidth
-  if (typeof config.arenaWidth !== "number" || config.arenaWidth <= 0) {
+  if (typeof config.arenaWidth !== "number" || !Number.isFinite(config.arenaWidth) || config.arenaWidth <= 0) {
     errors.push("config.arenaWidth must be a positive number");
   }
 
   // arenaHeight
-  if (typeof config.arenaHeight !== "number" || config.arenaHeight <= 0) {
+  if (typeof config.arenaHeight !== "number" || !Number.isFinite(config.arenaHeight) || config.arenaHeight <= 0) {
     errors.push("config.arenaHeight must be a positive number");
   }
 
