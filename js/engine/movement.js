@@ -19,7 +19,8 @@ export function resolveMovement(world, robot, action) {
     case "move_to": {
       const target = resolveTargetPosition(world, action);
       if (!target) break;
-      const diff = sub(target, robot.position);
+      const navigationTarget = getNavigationTarget(world, robot, target);
+      const diff = sub(navigationTarget, robot.position);
       const dist = length(diff);
       if (dist < 0.1) {
         robot.velocity = vec2(0, 0);
@@ -35,7 +36,8 @@ export function resolveMovement(world, robot, action) {
     case "move_toward": {
       const target = resolveTargetPosition(world, action);
       if (!target) break;
-      const dir = normalize(sub(target, robot.position));
+      const navigationTarget = getNavigationTarget(world, robot, target);
+      const dir = normalize(sub(navigationTarget, robot.position));
       robot.velocity = scale(dir, moveSpeed);
       robot.heading = dir;
       break;
@@ -163,4 +165,92 @@ function resolveTargetPosition(world, action) {
   }
 
   return null;
+}
+
+function getNavigationTarget(world, robot, target) {
+  const blockingCover = firstBlockingCover(world, robot.position, target);
+  if (!blockingCover) return target;
+  return chooseCoverDetour(world, robot.position, target, blockingCover);
+}
+
+function firstBlockingCover(world, from, to) {
+  let blockingCover = null;
+  let nearestIntersection = Infinity;
+  for (const cover of world.covers.values()) {
+    if (!segmentIntersectsExpandedRect(from, to, cover, ROBOT_RADIUS + 0.2)) continue;
+    const dx = cover.position.x - from.x;
+    const dy = cover.position.y - from.y;
+    const distSq = (dx * dx) + (dy * dy);
+    if (distSq < nearestIntersection) {
+      nearestIntersection = distSq;
+      blockingCover = cover;
+    }
+  }
+  return blockingCover;
+}
+
+function chooseCoverDetour(world, from, to, cover) {
+  const margin = ROBOT_RADIUS + 0.75;
+  const above = clamp(
+    vec2(cover.position.x, cover.position.y - (cover.height / 2) - margin),
+    ROBOT_RADIUS,
+    ROBOT_RADIUS,
+    world.config.arenaWidth - ROBOT_RADIUS,
+    world.config.arenaHeight - ROBOT_RADIUS,
+  );
+  const below = clamp(
+    vec2(cover.position.x, cover.position.y + (cover.height / 2) + margin),
+    ROBOT_RADIUS,
+    ROBOT_RADIUS,
+    world.config.arenaWidth - ROBOT_RADIUS,
+    world.config.arenaHeight - ROBOT_RADIUS,
+  );
+
+  const aboveCost = distance(from, above) + distance(above, to);
+  const belowCost = distance(from, below) + distance(below, to);
+  return aboveCost <= belowCost ? above : below;
+}
+
+function segmentIntersectsExpandedRect(start, end, cover, padding) {
+  const halfW = (cover.width / 2) + padding;
+  const halfH = (cover.height / 2) + padding;
+  const minX = cover.position.x - halfW;
+  const maxX = cover.position.x + halfW;
+  const minY = cover.position.y - halfH;
+  const maxY = cover.position.y + halfH;
+
+  const startInside = start.x >= minX && start.x <= maxX && start.y >= minY && start.y <= maxY;
+  const endInside = end.x >= minX && end.x <= maxX && end.y >= minY && end.y <= maxY;
+  if (startInside || endInside) return true;
+
+  const corners = [
+    vec2(minX, minY),
+    vec2(maxX, minY),
+    vec2(maxX, maxY),
+    vec2(minX, maxY),
+  ];
+
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % corners.length];
+    if (segmentsIntersect(start, end, a, b)) return true;
+  }
+
+  return false;
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+
+  if (o1 !== o2 && o3 !== o4) return true;
+  return false;
+}
+
+function orientation(p, q, r) {
+  const v = ((q.y - p.y) * (r.x - q.x)) - ((q.x - p.x) * (r.y - q.y));
+  if (Math.abs(v) < 0.000001) return 0;
+  return v > 0 ? 1 : 2;
 }
