@@ -273,6 +273,8 @@ export class SemanticAnalyzer {
     }
     // Built-in sensors without () are also valid identifiers in some contexts
     if (BUILTIN_SENSORS.has(name)) return true;
+    // User-defined function names are valid references
+    if (this.#functions.has(name)) return true;
     return false;
   }
 

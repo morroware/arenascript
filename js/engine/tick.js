@@ -198,10 +198,16 @@ export function runMatch(setup) {
       }
     }
 
-    // Phase 10: Write replay trace
+    // Phase 10: Write replay trace — merge movement and combat actions per robot
     const replayActions = new Map();
-    for (const [robotId, action] of movementActions) replayActions.set(robotId, action);
-    for (const [robotId, action] of combatActions) replayActions.set(robotId, action);
+    for (const [robotId, action] of movementActions) {
+      replayActions.set(robotId, { movement: action, combat: combatActions.get(robotId) ?? null });
+    }
+    for (const [robotId, action] of combatActions) {
+      if (!replayActions.has(robotId)) {
+        replayActions.set(robotId, { movement: null, combat: action });
+      }
+    }
     replayWriter.captureFrame(world, tickEvents, replayActions);
 
     // Phase 11: Check win conditions

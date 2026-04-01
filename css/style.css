@@ -354,14 +354,29 @@ body {
   min-height: 0;
 }
 
+/* ---- Resize Handle ---- */
+
+.resize-handle {
+  width: 5px;
+  min-width: 5px;
+  cursor: col-resize;
+  background: var(--border);
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.resize-handle:hover,
+.resize-handle.active {
+  background: var(--accent-cyan);
+}
+
 /* ---- Code Editor with Syntax Highlighting ---- */
 
 .editor-pane {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  border-right: 1px solid var(--border);
+  min-width: 250px;
 }
 
 .editor-container {
@@ -583,6 +598,13 @@ body {
   border-color: var(--accent-cyan);
 }
 
+.replay-btn.step-btn {
+  width: 24px;
+  height: 24px;
+  font-size: 9px;
+  letter-spacing: -2px;
+}
+
 .replay-scrubber {
   flex: 1;
   height: 4px;
@@ -697,6 +719,45 @@ body {
   background: rgba(255, 221, 0, 0.08);
   border-color: rgba(255, 221, 0, 0.25);
   color: var(--accent-yellow);
+}
+
+/* ---- Per-Robot Detail ---- */
+
+.result-robot-detail {
+  margin-top: 8px;
+}
+
+.result-robot-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.result-robot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  border-radius: 4px;
+  margin-bottom: 2px;
+}
+
+.result-robot-name {
+  font-weight: 700;
+  min-width: 60px;
+}
+
+.result-robot-stat {
+  color: var(--text-secondary);
+  font-size: 11px;
 }
 
 /* ---- Console ---- */

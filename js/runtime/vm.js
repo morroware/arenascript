@@ -26,6 +26,7 @@ export class VM {
     // Initialize state slots with default values
     this.stateSlots = program.stateSlots.map(s => s.initialValue);
     this.locals = new Array(256).fill(null);
+    this.localBase = 0;
   }
 
   /** Execute an event handler */
@@ -41,6 +42,7 @@ export class VM {
     this.budget.reset();
     this.callStack = [];
     this.iterStack = [];
+    this.localBase = 0;
 
     // Push event data onto the stack for handlers that declare a parameter
     // The compiled handler will pop it into a local slot via STORE_LOCAL
@@ -86,14 +88,20 @@ export class VM {
             break;
 
           case Op.LOAD_LOCAL: {
-            const slot = this.readU16();
+            const slot = this.localBase + this.readU16();
+            if (slot >= this.locals.length) {
+              throw new Error(`Local slot ${slot} out of bounds (max ${this.locals.length - 1})`);
+            }
             this.budget.memoryOp();
             this.push(this.locals[slot]);
             break;
           }
 
           case Op.STORE_LOCAL: {
-            const slot = this.readU16();
+            const slot = this.localBase + this.readU16();
+            if (slot >= this.locals.length) {
+              throw new Error(`Local slot ${slot} out of bounds (max ${this.locals.length - 1})`);
+            }
             this.budget.memoryOp();
             this.locals[slot] = this.pop();
             break;
@@ -166,7 +174,10 @@ export class VM {
               throw new Error("Call stack overflow: maximum recursion depth exceeded");
             }
             const target = this.readU16();
-            this.callStack.push({ returnAddress: this.ip, baseSlot: 0 });
+            const prevBase = this.localBase;
+            // Each call frame gets its own local variable window
+            this.callStack.push({ returnAddress: this.ip, localBase: prevBase });
+            this.localBase = prevBase + this.program.localWindowSize;
             this.ip = target;
             break;
           }
@@ -190,6 +201,7 @@ export class VM {
             if (this.callStack.length > 0) {
               const frame = this.callStack.pop();
               this.ip = frame.returnAddress;
+              this.localBase = frame.localBase;
             } else {
               return { actions: this.actions, budgetExceeded: false };
             }
@@ -201,9 +213,11 @@ export class VM {
             if (this.callStack.length > 0) {
               const frame = this.callStack.pop();
               this.ip = frame.returnAddress;
-            }
-            this.push(val);
-            if (this.callStack.length === 0) {
+              this.localBase = frame.localBase;
+              this.push(val);
+            } else {
+              // At top-level (event handler) — return with value
+              this.push(val);
               return { actions: this.actions, budgetExceeded: false };
             }
             break;

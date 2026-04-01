@@ -62,8 +62,8 @@ export function resolveCombat(world, robot, action) {
     case "shield": {
       const cd = robot.cooldowns.get("shield") ?? 0;
       if (cd > 0) break;
-      // Apply shield as a temporary health buffer (simplified for PoC)
-      robot.health = Math.min(robot.maxHealth + 20, robot.health + 20);
+      // Apply shield as a health restore capped at maxHealth
+      robot.health = Math.min(robot.maxHealth, robot.health + 20);
       robot.cooldowns.set("shield", SHIELD_COOLDOWN);
       break;
     }
