@@ -60,7 +60,31 @@
         </div>
       </button>
 
+      <button class="bot-preset" data-bot="flanker" title="Flanker — Ranger">
+        <div class="bot-class-icon ranger">L</div>
+        <div class="bot-preset-info">
+          <span class="bot-preset-name">Flanker</span>
+          <span class="bot-preset-class">Ranger</span>
+        </div>
+      </button>
+
+      <button class="bot-preset" data-bot="sentinel" title="Sentinel — Tank">
+        <div class="bot-class-icon tank">S</div>
+        <div class="bot-preset-info">
+          <span class="bot-preset-name">Sentinel</span>
+          <span class="bot-preset-class">Tank</span>
+        </div>
+      </button>
+
       <!-- Opponent Selector -->
+      <div class="sidebar-section">
+        <label for="match-mode">Match Mode</label>
+        <select id="match-mode" class="opponent-select">
+          <option value="duel_1v1" selected>Duel 1v1</option>
+          <option value="squad_2v2">Squad 2v2</option>
+        </select>
+      </div>
+
       <div class="sidebar-section">
         <label for="opponent-select">Opponent</label>
         <select id="opponent-select" class="opponent-select">
@@ -68,7 +92,18 @@
           <option value="kiter" selected>Kiter</option>
           <option value="fortress">Fortress</option>
           <option value="healer">Healer</option>
+          <option value="flanker">Flanker</option>
+          <option value="sentinel">Sentinel</option>
         </select>
+      </div>
+
+      <div class="sidebar-section">
+        <label for="team-preset-select">Team Simulation</label>
+        <select id="team-preset-select" class="opponent-select">
+          <option value="skirmish_pair">Skirmish Pair</option>
+          <option value="pressure_line">Pressure Line</option>
+        </select>
+        <button id="btn-run-team-sim" class="btn btn-run team-sim-btn">Run Team Sim</button>
       </div>
     </aside>
 

@@ -188,6 +188,9 @@ body {
 .sidebar-section {
   padding: 10px 14px;
   border-top: 1px solid var(--border);
+}
+
+.sidebar-section:last-child {
   margin-top: auto;
 }
 
@@ -215,6 +218,12 @@ body {
 .opponent-select:focus {
   outline: none;
   border-color: var(--accent-cyan);
+}
+
+.team-sim-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 8px;
 }
 
 /* ---- Main Content ---- */

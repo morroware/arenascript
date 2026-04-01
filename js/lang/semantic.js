@@ -12,6 +12,7 @@ const BUILTIN_SENSORS = new Set([
   "nearest_enemy", "visible_enemies", "enemy_count_in_range",
   "nearest_ally", "visible_allies",
   "nearest_cover", "nearest_resource", "nearest_control_point",
+  "nearest_enemy_control_point",
   "distance_to", "line_of_sight", "current_tick",
   "can_attack",
 ]);

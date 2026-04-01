@@ -3,7 +3,12 @@
 // ============================================================================
 
 import { distance, sub, normalize, scale, add } from "../shared/vec2.js";
-import { LOS_RANGE } from "../shared/config.js";
+import { CLASS_STATS, DEFAULT_VISION_RANGE, LOS_RANGE } from "../shared/config.js";
+
+function visionRangeFor(robot) {
+  const byClass = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
+  return Math.min(byClass, LOS_RANGE);
+}
 
 /** Check if a point is within a rectangular cover object */
 function pointInRect(p, cover) {
@@ -77,10 +82,11 @@ export function hasLineOfSight(world, from, to) {
 /** Get all enemy robots visible from a given robot */
 export function getVisibleEnemies(world, robot) {
   const visible = [];
+  const visionRange = visionRangeFor(robot);
   for (const other of world.robots.values()) {
     if (!other.alive) continue;
     if (other.teamId === robot.teamId) continue;
-    if (distance(robot.position, other.position) > LOS_RANGE) continue;
+    if (distance(robot.position, other.position) > visionRange) continue;
     if (hasLineOfSight(world, robot.position, other.position)) {
       visible.push(other);
     }
@@ -93,10 +99,12 @@ export function getVisibleEnemies(world, robot) {
 /** Get all ally robots visible from a given robot */
 export function getVisibleAllies(world, robot) {
   const visible = [];
+  const visionRange = visionRangeFor(robot);
   for (const other of world.robots.values()) {
     if (!other.alive) continue;
     if (other.id === robot.id) continue;
     if (other.teamId !== robot.teamId) continue;
+    if (distance(robot.position, other.position) > visionRange) continue;
     if (hasLineOfSight(world, robot.position, other.position)) {
       visible.push(other);
     }
