@@ -278,6 +278,10 @@ Commands are actions your robot performs. Each has cooldowns and energy costs.
 | `attack <target>` | Attack a target entity (must be in range) |
 | `move_toward <position>` | Move toward a position |
 | `move_to <position>` | Move to a specific position |
+| `move_forward` | Move in the robot's current heading direction |
+| `move_backward` | Move opposite the robot's current heading |
+| `turn_left` | Rotate heading left (no translation this tick) |
+| `turn_right` | Rotate heading right (no translation this tick) |
 | `retreat` | Move away from the nearest threat |
 | `shield` | Activate a damage shield (3 tick duration, 30 tick cooldown) |
 | `dash` | Quick movement burst (5.0 distance, 20 tick cooldown) |
@@ -299,6 +303,10 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `health()` | number | Current health |
 | `energy()` | number | Current energy |
 | `can_attack(target)` | boolean | Whether target is visible, in range, and off cooldown |
+| `enemy_visible()` | boolean | Convenience check: whether any enemy is currently visible |
+| `wall_ahead(distance?)` | boolean | Whether heading path intersects arena bounds or cover soon |
+| `damage_percent()` | number | Percent damage taken (0-100) |
+| `random(min, max)` | number | Deterministic integer random in inclusive range |
 | `distance_to(position)` | number | Distance from robot to a position |
 | `visible_enemies()` | list | All enemies within line-of-sight |
 | `visible_allies()` | list | All allies within line-of-sight |

@@ -50,6 +50,40 @@ export function resolveMovement(world, robot, action) {
       break;
     }
 
+    case "move_forward": {
+      const dir = normalize(robot.heading);
+      robot.velocity = scale(dir, moveSpeed);
+      break;
+    }
+
+    case "move_backward": {
+      const dir = normalize(scale(robot.heading, -1));
+      robot.velocity = scale(dir, moveSpeed);
+      break;
+    }
+
+    case "turn_left": {
+      const angle = Math.PI / 10;
+      const dir = normalize(vec2(
+        (robot.heading.x * Math.cos(angle)) - (robot.heading.y * Math.sin(angle)),
+        (robot.heading.x * Math.sin(angle)) + (robot.heading.y * Math.cos(angle)),
+      ));
+      robot.heading = dir;
+      robot.velocity = vec2(0, 0);
+      break;
+    }
+
+    case "turn_right": {
+      const angle = -Math.PI / 10;
+      const dir = normalize(vec2(
+        (robot.heading.x * Math.cos(angle)) - (robot.heading.y * Math.sin(angle)),
+        (robot.heading.x * Math.sin(angle)) + (robot.heading.y * Math.cos(angle)),
+      ));
+      robot.heading = dir;
+      robot.velocity = vec2(0, 0);
+      break;
+    }
+
     case "strafe_right": {
       // Perpendicular to heading, clockwise
       const dir = vec2(robot.heading.y, -robot.heading.x);
@@ -101,6 +135,30 @@ export function applyMovement(world, robot) {
   );
 
   if (isInsideCover(world, clamped)) {
+    const slideX = clamp(
+      vec2(clamped.x, oldPos.y),
+      ROBOT_RADIUS,
+      ROBOT_RADIUS,
+      world.config.arenaWidth - ROBOT_RADIUS,
+      world.config.arenaHeight - ROBOT_RADIUS,
+    );
+    if (!isInsideCover(world, slideX)) {
+      robot.position = slideX;
+      return;
+    }
+
+    const slideY = clamp(
+      vec2(oldPos.x, clamped.y),
+      ROBOT_RADIUS,
+      ROBOT_RADIUS,
+      world.config.arenaWidth - ROBOT_RADIUS,
+      world.config.arenaHeight - ROBOT_RADIUS,
+    );
+    if (!isInsideCover(world, slideY)) {
+      robot.position = slideY;
+      return;
+    }
+
     robot.position = oldPos;
     robot.velocity = vec2(0, 0);
     return;
@@ -162,6 +220,12 @@ function resolveTargetPosition(world, action) {
   // Direct position
   if ("x" in action.target && "y" in action.target) {
     return action.target;
+  }
+
+  // Sensor objects often include { id, position, ... }.
+  if ("position" in action.target && action.target.position &&
+    "x" in action.target.position && "y" in action.target.position) {
+    return action.target.position;
   }
 
   return null;
