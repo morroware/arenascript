@@ -306,12 +306,23 @@ Commands are actions your robot performs. Each has cooldowns and energy costs.
 | `move_backward` | Move opposite the robot's current heading |
 | `turn_left` | Rotate heading left (no translation this tick) |
 | `turn_right` | Rotate heading right (no translation this tick) |
+| `strafe_left` | Move laterally left relative to current heading |
+| `strafe_right` | Move laterally right relative to current heading |
+| `stop` | Cancel current movement intent |
 | `retreat` | Move away from the nearest threat |
 | `shield` | Activate a damage shield (3 tick duration, 30 tick cooldown) |
-| `dash` | Quick movement burst (5.0 distance, 20 tick cooldown) |
 | `fire_at <target>` | Fire a projectile at a target (8 dmg, 15.0 range, 8 tick cooldown) |
 | `burst_fire <target>` | Fire a 3-shot spread volley (short-mid range pressure) |
 | `grenade <target>` | Detonate AoE damage around a target position |
+| `use_ability` | Trigger class/ability hook (engine-dependent behavior) |
+| `mark_target` | Mark enemy intent target (tactical command) |
+| `capture` | Prioritize objective capture action |
+| `ping` | Emit tactical ping marker |
+| `place_mine` | Place a mine at current location |
+| `send_signal <value>` | Broadcast a squad signal to nearby allies |
+| `mark_position <position>` | Write a remembered waypoint position |
+| `taunt` | Apply taunt effect in range |
+| `overwatch` | Enter overwatch stance with temporary bonuses |
 
 ## Built-in Sensors
 
@@ -325,21 +336,54 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `last_seen_enemy()` | entity or `null` | Last remembered enemy contact with `age` and `last_seen_tick` |
 | `has_recent_enemy_contact(max_age?)` | boolean | Whether memory contains recent enemy contact |
 | `nearest_ally()` | entity or `null` | Closest visible ally |
+| `visible_allies()` | list | All allies within line-of-sight |
+| `enemy_count_in_range(range?)` | number | Count visible enemies in range |
 | `nearest_control_point()` | position | Nearest capture point |
+| `nearest_enemy_control_point()` | position | Nearest enemy-held control point |
+| `nearest_cover()` | position or `null` | Closest cover object |
+| `nearest_resource()` | entity or `null` | Closest resource node |
 | `nearest_heal_zone()` | zone or `null` | Nearest healing zone with `position` and `radius` |
+| `nearest_hazard()` | zone or `null` | Nearest hazard zone |
+| `nearest_sound()` | sound or `null` | Most relevant recent sound cue |
+| `nearest_mine()` | mine or `null` | Closest detectable mine |
+| `nearest_pickup()` | pickup or `null` | Closest pickup |
 | `health()` | number | Current health |
+| `max_health()` | number | Max health for robot class |
+| `health_percent()` | number | Current health percentage |
 | `energy()` | number | Current energy |
+| `position()` | position | Current world position |
+| `velocity()` | vector | Current movement vector |
+| `heading()` | number | Current heading/orientation |
+| `cooldown(action?)` | number | Remaining cooldown info |
 | `can_attack(target)` | boolean | Whether target is visible, in range, and off cooldown |
 | `enemy_visible()` | boolean | Convenience check: whether any enemy is currently visible |
+| `line_of_sight(position)` | boolean | LOS test against a position |
 | `wall_ahead(distance?)` | boolean | Whether heading path intersects arena bounds or cover soon |
 | `damage_percent()` | number | Percent damage taken (0-100) |
 | `random(min, max)` | number | Deterministic integer random in inclusive range |
 | `distance_to(position)` | number | Distance from robot to a position |
+| `current_tick()` | number | Current simulation tick index |
 | `visible_enemies()` | list | All enemies within line-of-sight |
-| `visible_allies()` | list | All allies within line-of-sight |
 | `team_size()` | number | Squad size for this script instance (1-5) |
 | `my_index()` | number | Zero-based squad index for this robot |
 | `my_role()` | string | Assigned squad role string (or empty string) |
+| `is_in_heal_zone()` | boolean | Whether robot is currently in a heal zone |
+| `is_in_hazard()` | boolean | Whether robot is currently in a hazard |
+| `arena_width()` | number | Arena width |
+| `arena_height()` | number | Arena height |
+| `spawn_position()` | position | Original spawn position |
+| `recall_position(label?)` | position or `null` | Read remembered waypoint |
+| `discovered_count()` | number | Count of discovered entities/objectives |
+| `angle_to(position)` | number | Relative angle to position |
+| `is_facing(position, tolerance?)` | boolean | Facing check |
+| `enemy_heading(enemy)` | number | Heading of enemy |
+| `is_enemy_facing_me(enemy, tolerance?)` | boolean | Whether enemy faces this robot |
+| `ally_health(ally)` | number | Ally health lookup |
+| `kills()` | number | Current kill count |
+| `time_alive()` | number | Ticks alive so far |
+| `has_effect(name)` | boolean | Whether robot has named status effect |
+| `is_taunted()` | boolean | Whether robot is taunted |
+| `is_in_overwatch()` | boolean | Whether robot is in overwatch |
 
 ### Entity Properties
 

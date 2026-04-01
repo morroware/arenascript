@@ -84,8 +84,16 @@ Server-side match execution and result storage.
 
 | Method | Description |
 |--------|-------------|
-| `runMatch($setup)` | Execute a match with the given configuration |
-| `getResult($matchId)` | Retrieve stored match result |
+| `runRankedMatch($request)` | Execute 1v1 ranked orchestration and apply Elo updates |
+| `runUnrankedMatch($request)` | Execute unranked two-player orchestration |
+| `runUnrankedMatchWithParticipants($request)` | Execute unranked match with any participant count |
+| `getMatchHistory($limit)` | Retrieve recent match records |
+| `getReplay($matchId)` | Retrieve stored replay payload by id |
+| `getMatchCount()` | Return number of recorded matches |
+
+Notes:
+- The PHP class currently uses a `runMatchEngine()` hook stub for actual simulation execution.
+- `runRankedMatch()` applies Elo only when mode is `1v1_ranked`.
 
 ### lobby.php
 
@@ -96,10 +104,12 @@ Multiplayer lobby lifecycle management.
 | Method | Description |
 |--------|-------------|
 | `createLobby($hostId, $name, $mode)` | Create a new lobby |
-| `joinLobby($lobbyId, $playerId, $program, $constants)` | Join an existing lobby |
+| `joinLobby($lobbyId, $playerId)` | Join an existing lobby |
 | `leaveLobby($lobbyId, $playerId)` | Leave a lobby |
+| `submitProgram($lobbyId, $playerId, $program, $constants)` | Submit compiled bot and mark player ready |
 | `startMatch($lobbyId)` | Start the match when ready |
 | `listLobbies()` | Get all open lobbies |
+| `getLobby($id)` | Get lobby data by id |
 
 **Supported modes:**
 - `1v1_unranked` (2 players)
@@ -164,6 +174,19 @@ const result = runMatch({
 // result.replay     - Replay data with frames array
 // result.robotStats - Map of robot stats (damageDealt, damageTaken, kills)
 ```
+
+Before calling `runMatch`, validate payloads with:
+
+```javascript
+import { validateMatchRequest } from "./shared/validation.js";
+
+const validation = validateMatchRequest(request);
+if (!validation.valid) {
+  console.error(validation.errors);
+}
+```
+
+Validation rejects invalid mode/count combinations and malformed config values including non-finite arena dimensions.
 
 ### Replay Data
 

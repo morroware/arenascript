@@ -82,6 +82,17 @@ The `compile(source)` function runs all four stages in sequence and returns:
 }
 ```
 
+### Shared Validation (`js/shared/validation.js`)
+
+Centralized validators gate match setup data before execution:
+- `validateMatchMode(mode)`
+- `validateParticipantCount(mode, count)`
+- `validateMatchConfig(config)`
+- `validateParticipant(participant)`
+- `validateMatchRequest(request)`
+
+`validateMatchConfig` enforces finite, positive arena dimensions and rejects malformed numeric inputs (including `NaN` and `Infinity`) early.
+
 ---
 
 ## Runtime (`js/runtime/`)
@@ -185,7 +196,7 @@ Gateway layer between robot VMs and the world. Provides:
 - `can_attack()` - Attack feasibility check
 - `visible_enemies()` / `visible_allies()` - List queries
 
-All sensor results are filtered through line-of-sight.
+All sensor results are filtered through line-of-sight and include tactical/perception helpers used by newer language features (signals, mines, pickups, team role context).
 
 ### Actions (`actions.js`)
 

@@ -7,6 +7,7 @@ A deterministic robot arena combat engine with a custom domain-specific language
 - **Custom DSL** - ArenaScript language with lexer, parser, semantic analyzer, and bytecode compiler
 - **Sandboxed VM** - Stack-based bytecode interpreter with budget metering (prevents infinite loops)
 - **Deterministic Engine** - 11-phase tick-based simulation with seeded PRNG for reproducible matches
+- **Centralized Validation** - Mode/config/participant request validation with strict numeric guards (`NaN`/`Infinity` rejected for arena dimensions)
 - **Dynamic Arenas** - Seeded randomized cover layouts + healing zones for replay-safe map variety
 - **Live Visualization** - Canvas-based arena rendering with replay animation
 - **4 Robot Classes** - Brawler, Ranger, Tank, and Support with distinct stats
