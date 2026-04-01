@@ -126,8 +126,11 @@ export function validateParticipant(participant) {
   if (participant.program == null || typeof participant.program !== "object") {
     errors.push("participant.program must be an object");
   } else {
-    if (participant.program.bytecode == null || typeof participant.program.bytecode !== "object") {
-      errors.push("participant.program.bytecode must be an array-like object");
+    const bytecode = participant.program.bytecode;
+    const isBytecodeArray = Array.isArray(bytecode)
+      || (ArrayBuffer.isView(bytecode) && !(bytecode instanceof DataView));
+    if (!isBytecodeArray) {
+      errors.push("participant.program.bytecode must be an array or typed array");
     }
     if (!Array.isArray(participant.program.stateSlots)) {
       errors.push("participant.program.stateSlots must be an array");

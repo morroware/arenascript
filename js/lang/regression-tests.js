@@ -834,6 +834,17 @@ function testValidateParticipantRejectsMissingFields() {
   assert.ok(result.errors.length >= 2);
 }
 
+function testValidateParticipantRejectsNonArrayBytecode() {
+  const result = validateParticipant({
+    program: { bytecode: {}, stateSlots: [], eventHandlers: {} },
+    constants: [],
+    playerId: "p1",
+    teamId: 0,
+  });
+  assert.ok(!result.valid);
+  assert.ok(result.errors.some(e => e.includes("participant.program.bytecode must be an array or typed array")));
+}
+
 function testValidateMatchRequestFullValid() {
   const prog = compile(`robot "Test" version "1.0"\non tick { stop }`);
   assert.ok(prog.success);
@@ -1060,6 +1071,7 @@ function run() {
     testValidateMatchConfigRejectsBadSeed,
     testValidateMatchConfigRejectsNonFiniteArenaSize,
     testValidateParticipantRejectsMissingFields,
+    testValidateParticipantRejectsNonArrayBytecode,
     testValidateMatchRequestFullValid,
     // Replay bookmarks
     testComputeBookmarksDetectsDamage,
