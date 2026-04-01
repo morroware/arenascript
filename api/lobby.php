@@ -3,6 +3,7 @@
 // Lobby System — Multiplayer match orchestration
 // ============================================================================
 
+require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/match-runner.php';
 require_once __DIR__ . '/matchmaking.php';
 
@@ -208,10 +209,10 @@ class LobbyManager
             ],
             'config' => [
                 'mode'        => $lobby['mode'],
-                'arenaWidth'  => 100,
-                'arenaHeight' => 100,
-                'maxTicks'    => 3000,
-                'tickRate'    => 30,
+                'arenaWidth'  => ARENA_WIDTH,
+                'arenaHeight' => ARENA_HEIGHT,
+                'maxTicks'    => MAX_TICKS,
+                'tickRate'    => TICK_RATE,
                 'seed'        => random_int(0, 2147483646),
             ],
         ]);
