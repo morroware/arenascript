@@ -58,8 +58,6 @@ export const TokenType = Object.freeze({
   GreaterEqual: "GreaterEqual",
 
   // Special
-  Newline: "Newline",
-  Comment: "Comment",
   EOF: "EOF",
 });
 

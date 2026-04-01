@@ -138,6 +138,9 @@
           <div id="error-bar" class="error-bar"></div>
         </div>
 
+        <!-- Resize Handle -->
+        <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
+
         <!-- Arena Pane -->
         <div class="arena-pane">
           <div class="arena-header">
@@ -151,6 +154,8 @@
           <!-- Replay Controls -->
           <div class="replay-controls" id="replay-controls">
             <button id="btn-replay-toggle" class="replay-btn" title="Play / Pause">&#9654;</button>
+            <button id="btn-replay-step-back" class="replay-btn step-btn" title="Step Back">&#9664;&#9664;</button>
+            <button id="btn-replay-step" class="replay-btn step-btn" title="Step Forward">&#9654;&#9654;</button>
             <input id="replay-scrubber" class="replay-scrubber" type="range" min="0" max="100" value="0">
             <span id="replay-tick-label" class="replay-tick-label">0 / 0</span>
             <label class="speed-label">
@@ -170,6 +175,7 @@
           <div id="match-results" class="match-results">
             <div class="match-results-title">Match Results</div>
             <div id="results-content" class="result-grid"></div>
+            <div id="results-robot-detail" class="result-robot-detail"></div>
           </div>
         </div>
 

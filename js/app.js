@@ -293,9 +293,12 @@ const presetButtons = document.querySelectorAll(".bot-preset");
 // Replay controls
 const replayControlsEl = document.getElementById("replay-controls");
 const btnReplayToggle = document.getElementById("btn-replay-toggle");
+const btnReplayStep = document.getElementById("btn-replay-step");
+const btnReplayStepBack = document.getElementById("btn-replay-step-back");
 const replayScrubber = document.getElementById("replay-scrubber");
 const replayTickLabel = document.getElementById("replay-tick-label");
 const replaySpeedSelect = document.getElementById("replay-speed");
+const resultsRobotDetailEl = document.getElementById("results-robot-detail");
 
 const ctx = canvasEl.getContext("2d");
 
@@ -836,7 +839,7 @@ function showMatchResults(result, opponentName) {
 
   resultsContentEl.innerHTML = `
     <div class="result-winner ${isDraw ? 'draw' : ''}">${winnerLabel}</div>
-    <div class="result-item"><span class="rl">Reason</span>${result.reason}</div>
+    <div class="result-item"><span class="rl">Reason</span>${result.reason.replace(/_/g, ' ')}</div>
     <div class="result-item"><span class="rl">Ticks</span>${result.tickCount}</div>
     <div class="result-item"><span class="rl">Team 0 HP</span>${teamTotals.get(0).hp}</div>
     <div class="result-item"><span class="rl">Team 1 HP</span>${teamTotals.get(1).hp}</div>
@@ -845,6 +848,26 @@ function showMatchResults(result, opponentName) {
     <div class="result-item"><span class="rl">Team 0 Kills</span>${teamTotals.get(0).kills}</div>
     <div class="result-item"><span class="rl">Team 1 Kills</span>${teamTotals.get(1).kills}</div>
   `;
+
+  // Per-robot detail breakdown
+  if (resultsRobotDetailEl) {
+    let robotHtml = '<div class="result-robot-header">Robot Detail</div>';
+    for (const p of participants) {
+      const stats = result.robotStats.get(p.robotId);
+      if (!stats) continue;
+      const finalRobot = lastFrame?.robots.find(r => r.id === p.robotId);
+      const hp = finalRobot ? Math.max(0, finalRobot.health) : 0;
+      const teamColor = p.teamId === 0 ? 'var(--accent-cyan)' : 'var(--accent-red)';
+      const label = p.playerId === "player" ? "You" : p.playerId;
+      robotHtml += `<div class="result-robot-row">
+        <span class="result-robot-name" style="color:${teamColor}">${label}</span>
+        <span class="result-robot-stat">HP:${hp}</span>
+        <span class="result-robot-stat">Dmg:${stats.damageDealt}</span>
+        <span class="result-robot-stat">K:${stats.kills}</span>
+      </div>`;
+    }
+    resultsRobotDetailEl.innerHTML = robotHtml;
+  }
 }
 
 // ============================================================================
@@ -996,15 +1019,59 @@ function drawRobot(x, y, health, maxHealth, teamId, label, isAlive) {
   ctx.fillText(label, cx, cy + radius + 14);
 }
 
+function drawProjectile(x, y) {
+  const s = canvasScale();
+  const cx = x * s;
+  const cy = y * s;
+  const radius = 1.5 * s;
+
+  // Glow
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius + 3, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,221,0,0.25)";
+  ctx.fill();
+
+  // Core
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffdd00";
+  ctx.fill();
+}
+
 function drawFrame(frame, labels) {
   drawArenaBackground();
   if (!frame || !frame.robots) return;
+
+  // Draw projectiles first (behind robots)
+  if (frame.projectiles) {
+    for (const p of frame.projectiles) {
+      drawProjectile(p.position.x, p.position.y);
+    }
+  }
 
   for (let i = 0; i < frame.robots.length; i++) {
     const r = frame.robots[i];
     const maxHP = CLASS_STATS[r.robotClass]?.health || 100;
     const isAlive = r.health > 0;
     drawRobot(r.position.x, r.position.y, r.health, maxHP, r.teamId, labels[r.id] || r.id, isAlive);
+  }
+
+  // Draw event indicators (damage flashes, etc.)
+  if (frame.events) {
+    for (const evt of frame.events) {
+      if (evt.type === "damaged" && evt.data) {
+        const targetRobot = frame.robots.find(r => r.id === evt.robotId);
+        if (targetRobot && targetRobot.health > 0) {
+          const s = canvasScale();
+          const cx = targetRobot.position.x * s;
+          const cy = targetRobot.position.y * s;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 6 * s, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255,51,85,0.2)";
+          ctx.fill();
+        }
+      }
+    }
   }
 }
 
@@ -1122,6 +1189,38 @@ function scrubReplay() {
   }
 }
 
+function stepReplayForward() {
+  if (!replayData) return;
+  stopReplay();
+  btnReplayToggle.textContent = "\u25B6";
+  if (replayFrameIndex < replayData.length - 1) {
+    replayFrameIndex++;
+  }
+  const frame = replayData[replayFrameIndex];
+  if (frame) {
+    drawFrame(frame, replayLabels);
+    replayScrubber.value = replayFrameIndex;
+    replayTickLabel.textContent = `${frame.tick} / ${replayData[replayData.length - 1].tick}`;
+    arenaStatus.textContent = `Tick ${frame.tick}`;
+  }
+}
+
+function stepReplayBack() {
+  if (!replayData) return;
+  stopReplay();
+  btnReplayToggle.textContent = "\u25B6";
+  if (replayFrameIndex > 0) {
+    replayFrameIndex--;
+  }
+  const frame = replayData[replayFrameIndex];
+  if (frame) {
+    drawFrame(frame, replayLabels);
+    replayScrubber.value = replayFrameIndex;
+    replayTickLabel.textContent = `${frame.tick} / ${replayData[replayData.length - 1].tick}`;
+    arenaStatus.textContent = `Tick ${frame.tick}`;
+  }
+}
+
 // ============================================================================
 // Preset Loading
 // ============================================================================
@@ -1193,6 +1292,8 @@ presetButtons.forEach((btn) => {
 
 // Replay controls
 btnReplayToggle.addEventListener("click", toggleReplayPlayPause);
+btnReplayStep?.addEventListener("click", stepReplayForward);
+btnReplayStepBack?.addEventListener("click", stepReplayBack);
 replayScrubber.addEventListener("input", () => {
   stopReplay();
   btnReplayToggle.textContent = "\u25B6";
@@ -1201,6 +1302,44 @@ replayScrubber.addEventListener("input", () => {
 replaySpeedSelect.addEventListener("change", () => {
   replaySpeed = parseFloat(replaySpeedSelect.value) || 1;
 });
+
+// Resize handle for editor/arena split
+const resizeHandle = document.getElementById("resize-handle");
+const editorPane = document.querySelector(".editor-pane");
+const arenaPane = document.querySelector(".arena-pane");
+if (resizeHandle && editorPane && arenaPane) {
+  let isResizing = false;
+  resizeHandle.addEventListener("mousedown", (e) => {
+    isResizing = true;
+    resizeHandle.classList.add("active");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!isResizing) return;
+    const workspace = document.querySelector(".workspace");
+    if (!workspace) return;
+    const rect = workspace.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const totalW = rect.width;
+    const minEditor = 250;
+    const minArena = 250;
+    const editorW = Math.max(minEditor, Math.min(totalW - minArena - 5, offsetX));
+    editorPane.style.flex = "none";
+    editorPane.style.width = `${editorW}px`;
+    arenaPane.style.flex = "none";
+    arenaPane.style.width = `${totalW - editorW - 5}px`;
+  });
+  document.addEventListener("mouseup", () => {
+    if (isResizing) {
+      isResizing = false;
+      resizeHandle.classList.remove("active");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+  });
+}
 
 // Keyboard shortcuts
 document.addEventListener("keydown", (e) => {

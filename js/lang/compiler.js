@@ -45,6 +45,9 @@ class ChunkBuilder {
         if ("value" in c && "value" in entry && c.value === entry.value) return i;
       }
     }
+    if (this.constants.length >= 0xFFFF) {
+      throw new Error("Constant pool overflow: program exceeds 65535 constants");
+    }
     this.constants.push(entry);
     return this.constants.length - 1;
   }
@@ -203,6 +206,7 @@ export class Compiler {
         stateSlots: this.#stateSlots,
         eventHandlers,
         functions,
+        localWindowSize: chunk.localCount,
       },
       constants: chunk.constants,
     };
@@ -479,6 +483,43 @@ export class Compiler {
       case "StringLiteral": return expr.value;
       case "BooleanLiteral": return expr.value;
       case "NullLiteral": return null;
+      case "UnaryExpr": {
+        const operand = this.#evaluateConstantExpr(expr.operand);
+        if (expr.operator === "-" && typeof operand === "number") return -operand;
+        if (expr.operator === "not") return !operand;
+        return null;
+      }
+      case "BinaryExpr": {
+        const left = this.#evaluateConstantExpr(expr.left);
+        const right = this.#evaluateConstantExpr(expr.right);
+        if (typeof left === "number" && typeof right === "number") {
+          switch (expr.operator) {
+            case "+": return left + right;
+            case "-": return left - right;
+            case "*": return left * right;
+            case "/": return right !== 0 ? left / right : 0;
+            case "%": return right !== 0 ? left % right : 0;
+          }
+        }
+        if (typeof left === "string" && typeof right === "string" && expr.operator === "+") {
+          return left + right;
+        }
+        return null;
+      }
+      case "ComparisonExpr": {
+        const left = this.#evaluateConstantExpr(expr.left);
+        const right = this.#evaluateConstantExpr(expr.right);
+        if (left === null || right === null) return null;
+        switch (expr.operator) {
+          case "==": return left === right;
+          case "!=": return left !== right;
+          case "<": return left < right;
+          case "<=": return left <= right;
+          case ">": return left > right;
+          case ">=": return left >= right;
+        }
+        return null;
+      }
       default: return null;
     }
   }
