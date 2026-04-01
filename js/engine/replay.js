@@ -34,10 +34,30 @@ export class ReplayWriter {
       position: { x: p.position.x, y: p.position.y },
     }));
 
+    const mines = [...world.mines.values()].map(m => ({
+      id: m.id, teamId: m.teamId,
+      position: { x: m.position.x, y: m.position.y },
+    }));
+
+    const pickups = [...world.pickups.values()].filter(p => !p.collected).map(p => ({
+      id: p.id, type: p.type,
+      position: { x: p.position.x, y: p.position.y },
+    }));
+
+    // Track live cover state (for destructible cover changes)
+    const covers = [...world.covers.values()].map(c => ({
+      id: c.id, x: c.position.x, y: c.position.y,
+      w: c.width, h: c.height,
+      destructible: c.destructible, health: c.health,
+    }));
+
     this.#frames.push({
       tick: world.currentTick,
       robots,
       projectiles,
+      mines,
+      pickups,
+      covers,
       events: [...events],
     });
   }
@@ -47,6 +67,7 @@ export class ReplayWriter {
     this.#arenaLayout = {
       covers: [...world.covers.values()].map(c => ({
         x: c.position.x, y: c.position.y, w: c.width, h: c.height,
+        destructible: c.destructible ?? false,
       })),
       controlPoints: [...world.controlPoints.values()].map(cp => ({
         x: cp.position.x, y: cp.position.y, radius: cp.radius,

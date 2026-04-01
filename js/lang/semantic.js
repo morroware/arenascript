@@ -5,6 +5,7 @@
 const VALID_EVENTS = new Set([
   "spawn", "tick", "damaged", "enemy_seen", "enemy_lost",
   "cooldown_ready", "low_health", "destroyed",
+  "signal_received",
 ]);
 
 const BUILTIN_SENSORS = new Set([
@@ -20,6 +21,17 @@ const BUILTIN_SENSORS = new Set([
   "is_in_heal_zone", "is_in_hazard",
   "arena_width", "arena_height", "spawn_position",
   "discovered_count",
+  // New perception sensors
+  "health_percent", "angle_to", "is_facing", "enemy_heading",
+  "is_enemy_facing_me", "ally_health", "kills", "time_alive",
+  // Noise & signals
+  "nearest_sound",
+  // Mines & pickups
+  "nearest_mine", "nearest_pickup",
+  // Waypoint memory
+  "recall_position",
+  // State queries
+  "is_taunted", "is_in_overwatch", "has_effect",
 ]);
 
 const VALID_ACTIONS = new Set([
@@ -28,6 +40,7 @@ const VALID_ACTIONS = new Set([
   "mark_target", "capture", "ping",
   "burst_fire", "grenade",
   "move_forward", "move_backward", "turn_left", "turn_right",
+  "place_mine", "send_signal", "mark_position", "taunt", "overwatch",
 ]);
 
 const VALID_TYPES = new Set([
@@ -232,6 +245,20 @@ export class SemanticAnalyzer {
         for (const arg of stmt.args) {
           this.#validateExpression(arg);
         }
+        break;
+
+      case "AfterStatement":
+        this.#validateExpression(stmt.delay);
+        this.#pushScope();
+        this.#validateStatements(stmt.body);
+        this.#popScope();
+        break;
+
+      case "EveryStatement":
+        this.#validateExpression(stmt.interval);
+        this.#pushScope();
+        this.#validateStatements(stmt.body);
+        this.#popScope();
         break;
 
       case "ExpressionStatement":

@@ -18,6 +18,15 @@ import {
   MIN_HEAL_ZONES, MAX_HEAL_ZONES,
   MIN_HAZARD_ZONES, MAX_HAZARD_ZONES,
   SPAWN_CLEAR_RADIUS, CLASS_STATS, DEFAULT_VISION_RANGE,
+  MINE_DAMAGE, MINE_TRIGGER_RADIUS, MINE_MAX_PER_ROBOT, MINE_COOLDOWN, MINE_ENERGY_COST,
+  PICKUP_SPAWN_INTERVAL, PICKUP_MAX_ACTIVE, PICKUP_COLLECT_RADIUS,
+  PICKUP_EFFECT_DURATION, PICKUP_SPEED_MULTIPLIER, PICKUP_DAMAGE_MULTIPLIER,
+  PICKUP_VISION_BONUS, PICKUP_ENERGY_RESTORE,
+  NOISE_ATTACK_RADIUS, NOISE_MOVE_RADIUS, NOISE_GRENADE_RADIUS, NOISE_DECAY_TICKS,
+  SIGNAL_RANGE, SIGNAL_COOLDOWN,
+  OVERWATCH_DURATION, OVERWATCH_COOLDOWN, OVERWATCH_ENERGY_COST,
+  TAUNT_DURATION, TAUNT_COOLDOWN, TAUNT_RANGE, TAUNT_ENERGY_COST,
+  DESTRUCTIBLE_COVER_RATIO,
 } from "../shared/config.js";
 import { distance, vec2 } from "../shared/vec2.js";
 
@@ -118,6 +127,36 @@ export function runMatch(setup) {
       }
     }
 
+    // Phase 1b: Execute VM timers (after/every blocks)
+    for (const [robotId, vm] of robotVMs) {
+      const robot = world.getRobot(robotId);
+      if (!robot || !robot.alive) continue;
+      const timerActions = vm.executeTimers(tick);
+      // Timer actions get processed as utility actions
+      for (const action of timerActions) {
+        resolveUtilityAction(world, robot, action, robotStats);
+      }
+    }
+
+    // Phase 1c: Spawn pickups periodically
+    if (tick > 0 && tick % PICKUP_SPAWN_INTERVAL === 0) {
+      spawnRandomPickup(world);
+    }
+
+    // Phase 1d: Expire taunt/overwatch/effects
+    for (const robot of world.getAliveRobots()) {
+      if (robot.tauntedBy && tick >= robot.tauntExpiresTick) {
+        robot.tauntedBy = null;
+      }
+      if (robot.overwatchActive && tick >= robot.overwatchExpiresTick) {
+        robot.overwatchActive = false;
+      }
+      robot.activeEffects = robot.activeEffects.filter(e => tick < e.expiresTick);
+    }
+
+    // Phase 1e: Decay old noise events
+    world.noiseEvents = world.noiseEvents.filter(n => tick - n.tick <= NOISE_DECAY_TICKS);
+
     // Phase 2: Build sensor views (handled lazily by sensor gateway)
     // Phase 3 & 4: Execute robot programs and collect action intents
     const movementActions = new Map();
@@ -127,8 +166,11 @@ export function runMatch(setup) {
       const robot = world.getRobot(robotId);
       if (!robot || !robot.alive) continue;
 
+      // Overwatch prevents movement actions
+      const inOverwatch = robot.overwatchActive && tick < robot.overwatchExpiresTick;
+
       // Execute tick handler
-      const result = vm.executeEvent("tick");
+      const result = vm.executeEvent("tick", undefined, tick);
 
       if (result.budgetExceeded) {
         const stats = robotStats.get(robotId);
@@ -138,8 +180,14 @@ export function runMatch(setup) {
       // Validate and categorize actions
       if (result.actions.length > 0) {
         const { movement, combat, utility } = categorizeActions(result.actions);
+
+        // Process utility actions (place_mine, send_signal, mark_position, taunt, overwatch)
+        if (utility) {
+          resolveUtilityAction(world, robot, utility, robotStats);
+        }
+
         // Store primary actions
-        if (movement) {
+        if (movement && !inOverwatch) {
           const validated = validateAction(movement, robot);
           if (validated.valid) {
             movementActions.set(robotId, movement);
@@ -167,13 +215,32 @@ export function runMatch(setup) {
     }
     resolveCollisions(world);
 
-    // Phase 7: Resolve attacks and abilities
+    // Phase 7: Resolve attacks and abilities (+ generate noise)
     for (const robot of world.getAliveRobots()) {
       const combatAction = combatActions.get(robot.id);
       if (combatAction && ["attack", "fire_at", "burst_fire", "grenade", "use_ability", "shield"].includes(combatAction.type)) {
         resolveCombat(world, robot, combatAction);
+        // Generate noise from combat
+        if (combatAction.type === "grenade") {
+          world.addNoise(robot.position, NOISE_GRENADE_RADIUS, robot.id, tick);
+        } else if (["attack", "fire_at", "burst_fire"].includes(combatAction.type)) {
+          world.addNoise(robot.position, NOISE_ATTACK_RADIUS, robot.id, tick);
+        }
+      }
+      // Generate movement noise
+      if (movementActions.has(robot.id)) {
+        const moveType = movementActions.get(robot.id).type;
+        if (moveType !== "stop" && moveType !== "turn_left" && moveType !== "turn_right") {
+          world.addNoise(robot.position, NOISE_MOVE_RADIUS, robot.id, tick);
+        }
       }
     }
+
+    // Phase 7b: Detonate mines
+    detonateMines(world);
+
+    // Phase 7c: Collect pickups
+    collectPickups(world, tick);
 
     // Phase 8: Apply damage/effects (projectiles, zones)
     updateProjectiles(world);
@@ -182,6 +249,9 @@ export function runMatch(setup) {
 
     // Phase 8b: Update robot discovery memory for nearby map features
     updateDiscovery(world);
+
+    // Phase 8c: Dispatch signals to allies
+    dispatchSignals(world, robotVMs);
 
     // Update capture points
     for (const cp of world.controlPoints.values()) {
@@ -228,6 +298,9 @@ export function runMatch(setup) {
         const killedBy = event.data.killedBy;
         const killerStats = robotStats.get(killedBy);
         if (killerStats) killerStats.kills++;
+        // Also update the robot's own kill counter for the kills() sensor
+        const killerRobot = world.getRobot(killedBy);
+        if (killerRobot) killerRobot.kills = (killerRobot.kills ?? 0) + 1;
       }
     }
 
@@ -360,7 +433,8 @@ function initializeArenaLayout(world) {
         ch = rng.nextFloat(2, 4);
       }
 
-      world.addCover(pos, cw, ch);
+      const isDestructible = rng.nextFloat(0, 1) < DESTRUCTIBLE_COVER_RATIO;
+      world.addCover(pos, cw, ch, isDestructible);
       break;
     }
   }
@@ -475,6 +549,154 @@ function getSpawnPositionForTeam(world, teamId, teamMemberIndex) {
   const x = teamId % 2 === 0 ? w * 0.10 : w * 0.90;
   const y = Math.max(6, Math.min(h - 6, (h * 0.50) + laneOffset));
   return vec2(x, y);
+}
+
+/** Resolve utility actions (place_mine, send_signal, mark_position, taunt, overwatch) */
+function resolveUtilityAction(world, robot, action, robotStats) {
+  switch (action.type) {
+    case "place_mine": {
+      if (robot.minesPlaced >= MINE_MAX_PER_ROBOT) break;
+      const cd = robot.cooldowns.get("mine") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < MINE_ENERGY_COST) break;
+      world.addMine(robot.id, robot.teamId, robot.position, MINE_DAMAGE);
+      robot.minesPlaced++;
+      robot.cooldowns.set("mine", MINE_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - MINE_ENERGY_COST);
+      break;
+    }
+    case "send_signal": {
+      if (world.currentTick < robot.signalCooldownTick) break;
+      world.pendingSignals.push({
+        senderId: robot.id,
+        teamId: robot.teamId,
+        data: action.data ?? null,
+        position: { x: robot.position.x, y: robot.position.y },
+        range: SIGNAL_RANGE,
+        tick: world.currentTick,
+      });
+      robot.signalCooldownTick = world.currentTick + SIGNAL_COOLDOWN;
+      break;
+    }
+    case "mark_position": {
+      const name = action.data;
+      if (!name || typeof name !== "string") break;
+      robot.memory.waypoints.set(name, { x: robot.position.x, y: robot.position.y });
+      break;
+    }
+    case "taunt": {
+      const cd = robot.cooldowns.get("taunt") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < TAUNT_ENERGY_COST) break;
+      // Taunt nearest visible enemy
+      const enemies = [];
+      for (const other of world.robots.values()) {
+        if (!other.alive || other.teamId === robot.teamId) continue;
+        if (distance(robot.position, other.position) <= TAUNT_RANGE) {
+          enemies.push(other);
+        }
+      }
+      if (enemies.length > 0) {
+        enemies.sort((a, b) => distance(robot.position, a.position) - distance(robot.position, b.position));
+        const target = enemies[0];
+        target.tauntedBy = robot.id;
+        target.tauntExpiresTick = world.currentTick + TAUNT_DURATION;
+        robot.cooldowns.set("taunt", TAUNT_COOLDOWN);
+        robot.energy = Math.max(0, robot.energy - TAUNT_ENERGY_COST);
+      }
+      break;
+    }
+    case "overwatch": {
+      const cd = robot.cooldowns.get("overwatch") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < OVERWATCH_ENERGY_COST) break;
+      robot.overwatchActive = true;
+      robot.overwatchExpiresTick = world.currentTick + OVERWATCH_DURATION;
+      robot.cooldowns.set("overwatch", OVERWATCH_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - OVERWATCH_ENERGY_COST);
+      break;
+    }
+  }
+}
+
+/** Detonate mines when enemies step on them */
+function detonateMines(world) {
+  const toRemove = [];
+  for (const [id, mine] of world.mines) {
+    for (const robot of world.getAliveRobots()) {
+      if (robot.teamId === mine.teamId) continue;
+      if (distance(robot.position, mine.position) <= MINE_TRIGGER_RADIUS) {
+        applyDamage(world, robot, mine.damage, mine.ownerId);
+        toRemove.push(id);
+        break;
+      }
+    }
+  }
+  for (const id of toRemove) {
+    world.mines.delete(id);
+  }
+}
+
+/** Check if robots are standing on pickups and apply effects */
+function collectPickups(world, tick) {
+  const toRemove = [];
+  for (const [id, pickup] of world.pickups) {
+    if (pickup.collected) continue;
+    for (const robot of world.getAliveRobots()) {
+      if (distance(robot.position, pickup.position) <= PICKUP_COLLECT_RADIUS) {
+        pickup.collected = true;
+        toRemove.push(id);
+        // Apply pickup effect
+        switch (pickup.type) {
+          case "energy":
+            robot.energy = Math.min(robot.maxEnergy, robot.energy + PICKUP_ENERGY_RESTORE);
+            break;
+          case "speed":
+          case "damage":
+          case "vision":
+            robot.activeEffects.push({ type: pickup.type, expiresTick: tick + PICKUP_EFFECT_DURATION });
+            break;
+        }
+        break;
+      }
+    }
+  }
+  for (const id of toRemove) {
+    world.pickups.delete(id);
+  }
+}
+
+/** Spawn a random pickup at a random location */
+function spawnRandomPickup(world) {
+  if (world.pickups.size >= PICKUP_MAX_ACTIVE) return;
+  const { arenaWidth: w, arenaHeight: h } = world.config;
+  const types = ["energy", "speed", "damage", "vision"];
+  const type = types[Math.floor(world.rng.nextFloat(0, types.length))];
+  const x = world.rng.nextFloat(10, w - 10);
+  const y = world.rng.nextFloat(10, h - 10);
+  world.addPickup({ x, y }, type);
+}
+
+/** Dispatch pending signals to ally robots as signal_received events */
+function dispatchSignals(world, robotVMs) {
+  for (const signal of world.pendingSignals) {
+    for (const robot of world.getAliveRobots()) {
+      if (robot.teamId !== signal.teamId) continue;
+      if (robot.id === signal.senderId) continue;
+      if (distance(robot.position, signal.position) > signal.range) continue;
+      world.emitEvent({
+        type: "signal_received",
+        tick: world.currentTick,
+        robotId: robot.id,
+        data: {
+          senderId: signal.senderId,
+          data: signal.data,
+          senderPosition: signal.position,
+        },
+      });
+    }
+  }
+  world.pendingSignals = [];
 }
 
 /** Check if a team has won by eliminating all opponents */

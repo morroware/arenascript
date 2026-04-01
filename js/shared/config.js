@@ -67,6 +67,44 @@ export const MAX_HEAL_ZONES = 4;
 export const MIN_HAZARD_ZONES = 1;
 export const MAX_HAZARD_ZONES = 3;
 export const SPAWN_CLEAR_RADIUS = 15; // keep area around spawns clear of obstacles
+// --- Mines ---
+export const MINE_DAMAGE = 25;
+export const MINE_TRIGGER_RADIUS = 2.0;
+export const MINE_MAX_PER_ROBOT = 3;
+export const MINE_COOLDOWN = 40;
+export const MINE_ENERGY_COST = 15;
+export const MINE_VISIBLE_RANGE = 5.0; // enemies can see mines within this range
+// --- Pickups ---
+export const PICKUP_SPAWN_INTERVAL = 150; // ticks between pickup spawns
+export const PICKUP_MAX_ACTIVE = 4;
+export const PICKUP_COLLECT_RADIUS = 2.0;
+export const PICKUP_EFFECT_DURATION = 90; // ticks
+export const PICKUP_SPEED_MULTIPLIER = 1.5;
+export const PICKUP_DAMAGE_MULTIPLIER = 1.4;
+export const PICKUP_VISION_BONUS = 15.0;
+export const PICKUP_ENERGY_RESTORE = 50;
+// --- Noise ---
+export const NOISE_ATTACK_RADIUS = 25.0;
+export const NOISE_MOVE_RADIUS = 8.0;
+export const NOISE_GRENADE_RADIUS = 35.0;
+export const NOISE_DECAY_TICKS = 15; // how long noise persists
+// --- Signals ---
+export const SIGNAL_RANGE = 50.0; // how far signals travel
+export const SIGNAL_COOLDOWN = 10;
+// --- Overwatch ---
+export const OVERWATCH_DURATION = 30;
+export const OVERWATCH_COOLDOWN = 45;
+export const OVERWATCH_VISION_BONUS = 15.0;
+export const OVERWATCH_RANGE_BONUS = 4.0;
+export const OVERWATCH_ENERGY_COST = 20;
+// --- Taunt ---
+export const TAUNT_DURATION = 30;
+export const TAUNT_COOLDOWN = 50;
+export const TAUNT_RANGE = 12.0;
+export const TAUNT_ENERGY_COST = 15;
+// --- Destructible Cover ---
+export const DESTRUCTIBLE_COVER_HP = 50;
+export const DESTRUCTIBLE_COVER_RATIO = 0.3; // fraction of covers that are destructible
 // --- Ranked ---
 export const INITIAL_ELO = 1000;
 export const ELO_K_FACTOR = 32;

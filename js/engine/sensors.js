@@ -10,6 +10,8 @@ import {
   ATTACK_RANGE,
   CLASS_STATS,
   DEFAULT_VISION_RANGE,
+  MINE_VISIBLE_RANGE,
+  NOISE_DECAY_TICKS,
 } from "../shared/config.js";
 
 /** Convert a RobotState to a safe VM-visible object */
@@ -353,6 +355,180 @@ export function createSensorGateway(world) {
           if (!visibleIds.has(targetId)) return false;
         }
         return true;
+      }
+
+      // --- New Perception Sensors ---
+      case "health_percent":
+        return Math.round((robot.health / robot.maxHealth) * 100);
+
+      case "angle_to": {
+        const target = args[0];
+        if (!target) return 0;
+        let tx, ty;
+        if ("x" in target && "y" in target) { tx = target.x; ty = target.y; }
+        else if ("position" in target) { tx = target.position.x; ty = target.position.y; }
+        else return 0;
+        const dx = tx - robot.position.x;
+        const dy = ty - robot.position.y;
+        const targetAngle = Math.atan2(dy, dx);
+        const headingAngle = Math.atan2(robot.heading.y, robot.heading.x);
+        let diff = (targetAngle - headingAngle) * (180 / Math.PI);
+        if (diff > 180) diff -= 360;
+        if (diff < -180) diff += 360;
+        return Math.round(diff);
+      }
+
+      case "is_facing": {
+        const target = args[0];
+        const tolerance = args[1] ?? 30;
+        if (!target) return false;
+        let tx, ty;
+        if ("x" in target && "y" in target) { tx = target.x; ty = target.y; }
+        else if ("position" in target) { tx = target.position.x; ty = target.position.y; }
+        else return false;
+        const dx = tx - robot.position.x;
+        const dy = ty - robot.position.y;
+        const targetAngle = Math.atan2(dy, dx);
+        const headingAngle = Math.atan2(robot.heading.y, robot.heading.x);
+        let diff = Math.abs(targetAngle - headingAngle) * (180 / Math.PI);
+        if (diff > 180) diff = 360 - diff;
+        return diff <= tolerance;
+      }
+
+      case "enemy_heading": {
+        const target = args[0];
+        if (!target) return null;
+        const targetId = target.id ?? (typeof target === "string" ? target : null);
+        if (!targetId) return null;
+        const enemy = world.getRobot(targetId);
+        if (!enemy || !enemy.alive) return null;
+        // Must be visible
+        const visibleIds = new Set(getVisibleEnemies(world, robot).map(e => e.id));
+        if (!visibleIds.has(targetId)) return null;
+        return { x: enemy.heading.x, y: enemy.heading.y };
+      }
+
+      case "is_enemy_facing_me": {
+        const target = args[0];
+        if (!target) return false;
+        const targetId = target.id ?? (typeof target === "string" ? target : null);
+        if (!targetId) return false;
+        const enemy = world.getRobot(targetId);
+        if (!enemy || !enemy.alive) return false;
+        const visibleIds = new Set(getVisibleEnemies(world, robot).map(e => e.id));
+        if (!visibleIds.has(targetId)) return false;
+        const dx = robot.position.x - enemy.position.x;
+        const dy = robot.position.y - enemy.position.y;
+        const toMe = Math.atan2(dy, dx);
+        const theirHeading = Math.atan2(enemy.heading.y, enemy.heading.x);
+        let diff = Math.abs(toMe - theirHeading) * (180 / Math.PI);
+        if (diff > 180) diff = 360 - diff;
+        return diff <= 45;
+      }
+
+      case "ally_health": {
+        const target = args[0];
+        if (!target) return 0;
+        const allyId = target.id ?? (typeof target === "string" ? target : null);
+        if (!allyId) return 0;
+        const ally = world.getRobot(allyId);
+        if (!ally || !ally.alive || ally.teamId !== robot.teamId) return 0;
+        return ally.health;
+      }
+
+      case "kills":
+        return robot.kills ?? 0;
+
+      case "time_alive":
+        return world.currentTick - (robot.spawnTick ?? 0);
+
+      // --- Noise Sensor ---
+      case "nearest_sound": {
+        let nearestDist = Infinity;
+        let nearest = null;
+        const cutoff = world.currentTick - NOISE_DECAY_TICKS;
+        for (const noise of world.noiseEvents) {
+          if (noise.tick < cutoff) continue;
+          const d = distance(robot.position, noise.position);
+          if (d > noise.radius) continue;
+          // Don't hear your own team's noise
+          const source = world.getRobot(noise.sourceName);
+          if (source && source.teamId === robot.teamId) continue;
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = {
+              position: { x: noise.position.x, y: noise.position.y },
+              distance: Math.round(d),
+              age: world.currentTick - noise.tick,
+            };
+          }
+        }
+        return nearest;
+      }
+
+      // --- Mine Sensor ---
+      case "nearest_mine": {
+        let nearestDist = Infinity;
+        let nearest = null;
+        for (const mine of world.mines.values()) {
+          // Can only see enemy mines within close range
+          if (mine.teamId === robot.teamId) continue;
+          const d = distance(robot.position, mine.position);
+          if (d > MINE_VISIBLE_RANGE) continue;
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = {
+              id: mine.id,
+              position: { x: mine.position.x, y: mine.position.y },
+              distance: Math.round(d),
+            };
+          }
+        }
+        return nearest;
+      }
+
+      // --- Pickup Sensor ---
+      case "nearest_pickup": {
+        let nearestDist = Infinity;
+        let nearest = null;
+        const visionRange = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
+        for (const pickup of world.pickups.values()) {
+          if (pickup.collected) continue;
+          const d = distance(robot.position, pickup.position);
+          if (d > visionRange) continue;
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = {
+              id: pickup.id,
+              position: { x: pickup.position.x, y: pickup.position.y },
+              type: pickup.type,
+              distance: Math.round(d),
+            };
+          }
+        }
+        return nearest;
+      }
+
+      // --- Waypoint Memory ---
+      case "recall_position": {
+        const name = args[0];
+        if (!name || typeof name !== "string") return null;
+        const wp = robot.memory.waypoints.get(name);
+        if (!wp) return null;
+        return { x: wp.x, y: wp.y };
+      }
+
+      // --- State Queries ---
+      case "is_taunted":
+        return robot.tauntedBy !== null && world.currentTick < robot.tauntExpiresTick;
+
+      case "is_in_overwatch":
+        return robot.overwatchActive && world.currentTick < robot.overwatchExpiresTick;
+
+      case "has_effect": {
+        const effectType = args[0];
+        if (!effectType) return false;
+        return robot.activeEffects.some(e => e.type === effectType && world.currentTick < e.expiresTick);
       }
 
       default:

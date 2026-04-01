@@ -354,6 +354,40 @@ export class Compiler {
         break;
       }
 
+      case "AfterStatement": {
+        // Compile: push delay, emit SCHEDULE_ONCE <bodyEnd>, compile body, RETURN
+        this.#compileExpression(stmt.delay, b);
+        // SCHEDULE_ONCE takes a 2-byte operand that will be patched to body-end
+        const scheduleOffset = b.code.length;
+        b.emit(Op.SCHEDULE_ONCE, stmt.span.line, stmt.span.column);
+        b.code.push(0, 0); // placeholder for body-end offset
+        // Compile body
+        b.beginScope();
+        this.#compileStatements(stmt.body, b);
+        b.endScope();
+        b.emit(Op.RETURN);
+        // Patch the jump-past to point here
+        const bodyEnd = b.code.length;
+        b.code[scheduleOffset + 1] = (bodyEnd >> 8) & 0xff;
+        b.code[scheduleOffset + 2] = bodyEnd & 0xff;
+        break;
+      }
+
+      case "EveryStatement": {
+        this.#compileExpression(stmt.interval, b);
+        const scheduleOffset = b.code.length;
+        b.emit(Op.SCHEDULE_REPEAT, stmt.span.line, stmt.span.column);
+        b.code.push(0, 0); // placeholder for body-end offset
+        b.beginScope();
+        this.#compileStatements(stmt.body, b);
+        b.endScope();
+        b.emit(Op.RETURN);
+        const bodyEnd = b.code.length;
+        b.code[scheduleOffset + 1] = (bodyEnd >> 8) & 0xff;
+        b.code[scheduleOffset + 2] = bodyEnd & 0xff;
+        break;
+      }
+
       case "ExpressionStatement": {
         this.#compileExpression(stmt.expression, b);
         b.emit(Op.POP); // discard result

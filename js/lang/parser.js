@@ -11,6 +11,7 @@ const ACTION_KEYWORDS = new Set([
   "burst_fire", "grenade",
   "mark_target", "capture", "ping",
   "move_forward", "move_backward", "turn_left", "turn_right",
+  "place_mine", "send_signal", "mark_position", "taunt", "overwatch",
 ]);
 
 export class ParseError extends Error {
@@ -258,6 +259,10 @@ export class Parser {
         return this.#parseForStatement();
       case TokenType.Return:
         return this.#parseReturnStatement();
+      case TokenType.After:
+        return this.#parseAfterStatement();
+      case TokenType.Every:
+        return this.#parseEveryStatement();
       default:
         // Check if this is an action keyword
         if (token.type === TokenType.Identifier && ACTION_KEYWORDS.has(token.value)) {
@@ -361,6 +366,22 @@ export class Parser {
     }
 
     return { kind: "ActionStatement", action, args, span };
+  }
+
+  #parseAfterStatement() {
+    const span = this.#currentSpan();
+    this.#expect(TokenType.After);
+    const delay = this.#parseExpression();
+    const body = this.#parseBlock();
+    return { kind: "AfterStatement", delay, body, span };
+  }
+
+  #parseEveryStatement() {
+    const span = this.#currentSpan();
+    this.#expect(TokenType.Every);
+    const interval = this.#parseExpression();
+    const body = this.#parseBlock();
+    return { kind: "EveryStatement", interval, body, span };
   }
 
   #parseExpressionStatement() {

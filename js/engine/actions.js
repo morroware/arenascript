@@ -84,10 +84,11 @@ export function categorizeActions(actions) {
     "turn_left", "turn_right", "strafe_left", "strafe_right", "stop", "retreat",
   ]);
   const combatTypes = new Set(["attack", "fire_at", "burst_fire", "grenade", "use_ability", "shield"]);
+  const utilityTypes = new Set(["place_mine", "send_signal", "mark_position", "taunt", "overwatch"]);
 
   let movement = null;
   let combat = null;
-  const utility = [];
+  let utility = null;
 
   for (const rawAction of actions) {
     const action = normalizeActionIntent(rawAction);
@@ -95,8 +96,8 @@ export function categorizeActions(actions) {
       movement = action;
     } else if (combatTypes.has(action.type) && !combat) {
       combat = action;
-    } else {
-      utility.push(action);
+    } else if (utilityTypes.has(action.type) && !utility) {
+      utility = action;
     }
   }
 

@@ -15,9 +15,9 @@ import {
 
 const BOT_PRESETS = {
   bruiser: {
-    name: "Explorer",
+    name: "Scout",
     class: "brawler",
-    source: `robot "Explorer" version "2.0"
+    source: `robot "Scout" version "3.0"
 
 meta {
   author: "ArenaLab"
@@ -31,12 +31,11 @@ const {
 
 state {
   ticks_moving: number = 0
-  phase: string = "scout"
 }
 
 on spawn {
+  mark_position "home"
   set ticks_moving = 0
-  set phase = "scout"
 }
 
 on tick {
@@ -49,7 +48,6 @@ on tick {
   let enemy = nearest_enemy()
 
   if enemy != null {
-    set phase = "fight"
     if can_attack(enemy) {
       attack enemy
     } else {
@@ -58,35 +56,39 @@ on tick {
     return
   }
 
+  let mine = nearest_mine()
+  if mine != null and mine.distance < 3 {
+    turn_right
+    move_forward
+    return
+  }
+
   if health() < HEAL_THRESHOLD {
     let heal = nearest_heal_zone()
     if heal != null {
-      set phase = "heal"
       move_to heal.position
       return
     }
   }
 
-  set phase = "scout"
-  set ticks_moving = ticks_moving + 1
+  let pickup = nearest_pickup()
+  if pickup != null {
+    move_to pickup.position
+    return
+  }
 
+  set ticks_moving = ticks_moving + 1
   if wall_ahead(3) {
     turn_right
     set ticks_moving = 0
     return
   }
-
   if ticks_moving > TURN_INTERVAL {
     let dir = random(1, 3)
-    if dir == 1 {
-      turn_left
-    } else {
-      turn_right
-    }
+    if dir == 1 { turn_left } else { turn_right }
     set ticks_moving = 0
     return
   }
-
   move_forward
 }
 
@@ -94,16 +96,20 @@ on damaged(event) {
   if health() < 30 {
     let heal = nearest_heal_zone()
     if heal != null {
-      set phase = "heal"
+      move_to heal.position
     }
   }
+}
+
+on signal_received(event) {
+  move_toward event.senderPosition
 }`,
   },
 
   kiter: {
     name: "Kiter",
     class: "ranger",
-    source: `robot "Kiter" version "2.0"
+    source: `robot "Kiter" version "3.0"
 
 meta {
   author: "ArenaLab"
@@ -123,6 +129,13 @@ state {
 on spawn {
   set retreating = false
   set strafing_dir = 1
+  place_mine
+  every 60 {
+    let sound = nearest_sound()
+    if sound != null {
+      send_signal sound.position
+    }
+  }
 }
 
 on tick {
@@ -135,6 +148,11 @@ on tick {
 
   if enemy == null {
     set retreating = false
+    let sound = nearest_sound()
+    if sound != null {
+      move_toward sound.position
+      return
+    }
     let cp = nearest_control_point()
     if cp != null {
       move_to cp.position
@@ -160,7 +178,6 @@ on tick {
   }
 
   set retreating = false
-
   let dist = distance_to(enemy.position)
 
   if dist < KITE_RANGE {
@@ -173,11 +190,7 @@ on tick {
 
   if can_attack(enemy) {
     fire_at enemy.position
-    if strafing_dir > 0 {
-      strafe_right
-    } else {
-      strafe_left
-    }
+    if strafing_dir > 0 { strafe_right } else { strafe_left }
   } else {
     move_toward enemy.position
   }
@@ -195,7 +208,7 @@ on low_health {
   fortress: {
     name: "Fortress",
     class: "tank",
-    source: `robot "Fortress" version "2.0"
+    source: `robot "Fortress" version "3.0"
 
 meta {
   author: "ArenaLab"
@@ -213,6 +226,7 @@ state {
 
 on spawn {
   set has_position = false
+  mark_position "spawn"
 }
 
 on tick {
@@ -221,20 +235,22 @@ on tick {
     return
   }
 
+  if is_taunted() {
+    shield
+  }
+
   if not has_position {
     let cp = nearest_control_point()
     if cp != null {
       move_to cp.position
       if distance_to(cp.position) < 4 {
         set has_position = true
+        mark_position "hold"
+        place_mine
       }
       return
     }
-    if wall_ahead(3) {
-      turn_left
-    } else {
-      move_forward
-    }
+    if wall_ahead(3) { turn_left } else { move_forward }
     return
   }
 
@@ -244,6 +260,7 @@ on tick {
 
   let enemy = nearest_enemy()
   if enemy != null {
+    taunt
     if can_attack(enemy) {
       attack enemy
     } else {
@@ -275,13 +292,14 @@ on damaged {
   if health() < 45 {
     shield
   }
+  send_signal "under_attack"
 }`,
   },
 
   healer: {
     name: "Survivor",
     class: "support",
-    source: `robot "Survivor" version "2.0"
+    source: `robot "Survivor" version "3.0"
 
 meta {
   author: "ArenaLab"
@@ -311,6 +329,18 @@ fn find_safety() {
   }
 }
 
+on spawn {
+  mark_position "spawn"
+  every 45 {
+    let pickup = nearest_pickup()
+    if pickup != null {
+      if pickup.type == "energy" {
+        mark_position "energy_spot"
+      }
+    }
+  }
+}
+
 on tick {
   if is_in_hazard() {
     move_forward
@@ -319,6 +349,7 @@ on tick {
 
   if is_in_heal_zone() and health() < max_health() {
     set healing = true
+    mark_position "heal_spot"
     let enemy = nearest_enemy()
     if enemy != null and can_attack(enemy) {
       attack enemy
@@ -326,7 +357,6 @@ on tick {
     stop
     return
   }
-
   set healing = false
 
   if health() < FLEE_HEALTH {
@@ -334,9 +364,18 @@ on tick {
     return
   }
 
-  let enemy = nearest_enemy()
+  let pickup = nearest_pickup()
+  if pickup != null and pickup.type == "energy" {
+    move_to pickup.position
+    return
+  }
 
+  let enemy = nearest_enemy()
   if enemy != null {
+    if is_enemy_facing_me(enemy) and health() < SAFE_HEALTH {
+      find_safety()
+      return
+    }
     if can_attack(enemy) {
       attack enemy
     } else {
@@ -354,11 +393,7 @@ on tick {
   if cp != null {
     move_to cp.position
   } else {
-    if wall_ahead(3) {
-      turn_right
-    } else {
-      move_forward
-    }
+    if wall_ahead(3) { turn_right } else { move_forward }
   }
 }
 
@@ -368,6 +403,7 @@ on low_health {
 
 on damaged {
   if health() < FLEE_HEALTH {
+    send_signal "need_help"
     find_safety()
   }
 }`,
@@ -376,7 +412,7 @@ on damaged {
   flanker: {
     name: "Flanker",
     class: "ranger",
-    source: `robot "Flanker" version "2.0"
+    source: `robot "Flanker" version "3.0"
 
 meta {
   author: "ArenaLab"
@@ -384,7 +420,6 @@ meta {
 }
 
 const {
-  FLANK_OFFSET = 20
   ENGAGE_HEALTH = 35
 }
 
@@ -393,24 +428,13 @@ state {
   sweep_angle: number = 0
 }
 
-fn get_flank_position() {
-  let enemy = nearest_enemy()
-  if enemy == null {
-    return null
-  }
-  let ex = enemy.position.x
-  let ey = enemy.position.y
-  let w = arena_width()
-  let h = arena_height()
-  if ex < w / 2 {
-    return enemy.position
-  }
-  return enemy.position
-}
-
 on spawn {
   set flanking = true
   set sweep_angle = 0
+  place_mine
+  after 30 {
+    place_mine
+  }
 }
 
 on tick {
@@ -422,6 +446,11 @@ on tick {
   let enemy = nearest_enemy()
 
   if enemy == null {
+    let sound = nearest_sound()
+    if sound != null {
+      move_toward sound.position
+      return
+    }
     set sweep_angle = sweep_angle + 1
     if wall_ahead(4) {
       turn_right
@@ -429,7 +458,6 @@ on tick {
     } else {
       move_forward
     }
-
     if sweep_angle > 15 {
       turn_right
       set sweep_angle = 0
@@ -450,9 +478,11 @@ on tick {
   let dist = distance_to(enemy.position)
 
   if dist > 10 and flanking {
-    if wall_ahead(3) {
-      turn_left
+    if not is_enemy_facing_me(enemy) {
+      move_toward enemy.position
+      return
     }
+    if wall_ahead(3) { turn_left }
     strafe_right
     return
   }
@@ -460,8 +490,9 @@ on tick {
   set flanking = false
 
   if can_attack(enemy) {
+    let angle = angle_to(enemy.position)
     fire_at enemy.position
-    strafe_right
+    if angle > 0 { strafe_right } else { strafe_left }
   } else {
     move_toward enemy.position
   }
@@ -470,6 +501,7 @@ on tick {
 on enemy_seen {
   set flanking = true
   set sweep_angle = 0
+  send_signal "contact"
 }
 
 on damaged {
@@ -480,7 +512,7 @@ on damaged {
   sentinel: {
     name: "Sentinel",
     class: "tank",
-    source: `robot "Sentinel" version "2.0"
+    source: `robot "Sentinel" version "3.0"
 
 meta {
   author: "ArenaLab"
@@ -502,7 +534,6 @@ fn patrol() {
     turn_right
     return
   }
-
   let cp = nearest_control_point()
   if cp != null {
     if distance_to(cp.position) < 4 {
@@ -513,14 +544,22 @@ fn patrol() {
         turn_right
         turn_right
       }
+      overwatch
       stop
       return
     }
     move_to cp.position
     return
   }
-
   move_forward
+}
+
+on spawn {
+  mark_position "base"
+  place_mine
+  after 20 {
+    place_mine
+  }
 }
 
 on tick {
@@ -549,8 +588,16 @@ on tick {
   set patrolling = false
   set wait_timer = 0
 
+  if is_in_overwatch() {
+    if can_attack(enemy) {
+      attack enemy
+    }
+    return
+  }
+
   if can_attack(enemy) {
     attack enemy
+    taunt
   } else {
     let dist = distance_to(enemy.position)
     if dist < ENGAGE_RANGE {
@@ -571,6 +618,13 @@ on damaged {
     shield
   }
   set patrolling = false
+  send_signal "engaged"
+}
+
+on signal_received(event) {
+  if patrolling {
+    move_toward event.senderPosition
+  }
 }`,
   },
 };
@@ -1278,14 +1332,19 @@ function drawArenaBackground() {
   }
 
   // Cover walls / obstacles
-  ctx.fillStyle = "rgba(120, 140, 190, 0.2)";
-  ctx.strokeStyle = "rgba(140, 160, 220, 0.45)";
   ctx.lineWidth = 1;
   for (const cover of currentArenaLayout.covers) {
     const cw = cover.w * s;
     const ch = cover.h * s;
     const cx = (cover.x * s) - (cw / 2);
     const cy = (cover.y * s) - (ch / 2);
+    if (cover.destructible) {
+      ctx.fillStyle = "rgba(180, 120, 80, 0.25)";
+      ctx.strokeStyle = "rgba(200, 140, 100, 0.5)";
+    } else {
+      ctx.fillStyle = "rgba(120, 140, 190, 0.2)";
+      ctx.strokeStyle = "rgba(140, 160, 220, 0.45)";
+    }
     ctx.fillRect(cx, cy, cw, ch);
     ctx.strokeRect(cx, cy, cw, ch);
   }
@@ -1393,8 +1452,60 @@ function drawProjectile(x, y) {
 }
 
 function drawFrame(frame, labels) {
+  // Update cover data from frame if available (destructible cover may change)
+  if (frame.covers) {
+    currentArenaLayout.covers = frame.covers.map(c => ({
+      x: c.x, y: c.y, w: c.w, h: c.h, destructible: c.destructible,
+    }));
+  }
+
   drawArenaBackground();
   if (!frame || !frame.robots) return;
+
+  const s = canvasScale();
+
+  // Draw mines
+  if (frame.mines) {
+    for (const m of frame.mines) {
+      const mx = m.position.x * s;
+      const my = m.position.y * s;
+      ctx.beginPath();
+      ctx.arc(mx, my, 1.5 * s, 0, Math.PI * 2);
+      ctx.fillStyle = m.teamId === 0 ? "rgba(0,212,255,0.4)" : "rgba(255,51,85,0.4)";
+      ctx.fill();
+      ctx.strokeStyle = m.teamId === 0 ? "rgba(0,212,255,0.7)" : "rgba(255,51,85,0.7)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // Draw pickups
+  if (frame.pickups) {
+    const pickupColors = {
+      energy: "#00aaff", speed: "#ffff00", damage: "#ff4444", vision: "#aa44ff",
+    };
+    const pickupLabels = {
+      energy: "E", speed: "S", damage: "D", vision: "V",
+    };
+    for (const p of frame.pickups) {
+      const px = p.position.x * s;
+      const py = p.position.y * s;
+      const color = pickupColors[p.type] || "#ffffff";
+      // Pulsing glow
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5 * s, 0, Math.PI * 2);
+      ctx.fillStyle = color.replace(")", ",0.15)").replace("rgb", "rgba");
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px, py, 1.5 * s, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.fillStyle = "#000";
+      ctx.font = `bold ${Math.max(7, 1.5 * s)}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(pickupLabels[p.type] || "?", px, py + 0.5 * s);
+    }
+  }
 
   // Draw projectiles first (behind robots)
   if (frame.projectiles) {

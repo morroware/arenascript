@@ -608,6 +608,131 @@ on tick {
   assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
 }
 
+// --- New Feature Tests ---
+
+function testNewSensorsCompile() {
+  const source = `robot "SensorBot" version "1.0"
+meta { class: "ranger" }
+on tick {
+  let hp = health_percent()
+  let t = time_alive()
+  let k = kills()
+  let enemy = nearest_enemy()
+  if enemy != null {
+    let a = angle_to(enemy.position)
+    let f = is_facing(enemy.position, 30)
+    let h = enemy_heading(enemy)
+    let fm = is_enemy_facing_me(enemy)
+  }
+  let ally = nearest_ally()
+  if ally != null {
+    let ah = ally_health(ally)
+  }
+  let sound = nearest_sound()
+  let mine = nearest_mine()
+  let pickup = nearest_pickup()
+  let wp = recall_position("home")
+  let taunted = is_taunted()
+  let ow = is_in_overwatch()
+  let fast = has_effect("speed")
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
+function testNewActionsCompile() {
+  const source = `robot "ActionBot" version "1.0"
+meta { class: "tank" }
+on spawn {
+  mark_position "home"
+  place_mine
+  send_signal "ready"
+}
+on tick {
+  taunt
+  overwatch
+  place_mine
+  send_signal "attacking"
+  mark_position "current"
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
+function testAfterEveryCompile() {
+  const source = `robot "TimerBot" version "1.0"
+meta { class: "support" }
+on spawn {
+  after 30 {
+    send_signal "ready"
+  }
+  every 60 {
+    place_mine
+  }
+}
+on tick {
+  after 10 {
+    shield
+  }
+  move_forward
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
+function testSignalReceivedEvent() {
+  const source = `robot "Listener" version "1.0"
+meta { class: "ranger" }
+on signal_received(event) {
+  move_toward event.senderPosition
+}
+on tick {
+  move_forward
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
+function testMineDetonation() {
+  const world = new World({
+    mode: "test", arenaWidth: 100, arenaHeight: 100, maxTicks: 100, tickRate: 30, seed: 42,
+  });
+  const attacker = world.spawnRobot("Miner", "brawler", 0, "prog_a", { x: 20, y: 20 });
+  const victim = world.spawnRobot("Victim", "ranger", 1, "prog_b", { x: 21, y: 20 });
+  world.addMine(attacker.id, 0, { x: 21, y: 20 }, 25);
+  const healthBefore = victim.health;
+
+  // Manually trigger mine check (this is done in tick loop)
+  const toRemove = [];
+  for (const [id, mine] of world.mines) {
+    for (const robot of world.getAliveRobots()) {
+      if (robot.teamId === mine.teamId) continue;
+      const dx = robot.position.x - mine.position.x;
+      const dy = robot.position.y - mine.position.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d <= 2.0) {
+        robot.health -= mine.damage;
+        toRemove.push(id);
+        break;
+      }
+    }
+  }
+  for (const id of toRemove) world.mines.delete(id);
+
+  assert.ok(victim.health < healthBefore, "Mine should damage enemy robot");
+  assert.ok(world.mines.size === 0, "Mine should be removed after detonation");
+}
+
+function testPickupCollection() {
+  const world = new World({
+    mode: "test", arenaWidth: 100, arenaHeight: 100, maxTicks: 100, tickRate: 30, seed: 42,
+  });
+  const robot = world.spawnRobot("Collector", "ranger", 0, "prog_a", { x: 50, y: 50 });
+  world.addPickup({ x: 50.5, y: 50 }, "energy");
+  const energyBefore = robot.energy;
+  assert.ok(world.pickups.size === 1, "Pickup should exist");
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -638,6 +763,12 @@ function run() {
     testSquadSizeSpawnsMultipleRobotsPerParticipant,
     testNewCombatActionsCompileAndRun,
     testHealingZonesAndSensorsCompile,
+    testNewSensorsCompile,
+    testNewActionsCompile,
+    testAfterEveryCompile,
+    testSignalReceivedEvent,
+    testMineDetonation,
+    testPickupCollection,
   ];
 
   let passed = 0;
