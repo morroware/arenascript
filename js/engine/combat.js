@@ -97,6 +97,20 @@ export function resolveCombat(world, robot, action) {
           applyDamage(world, other, GRENADE_DAMAGE, robot.id);
         }
       }
+      // Damage destructible cover in blast radius
+      const coversToRemove = [];
+      for (const [coverId, cover] of world.covers) {
+        if (!cover.destructible) continue;
+        if (distance(cover.position, targetPos) <= GRENADE_RADIUS) {
+          cover.health -= GRENADE_DAMAGE;
+          if (cover.health <= 0) {
+            coversToRemove.push(coverId);
+          }
+        }
+      }
+      for (const id of coversToRemove) {
+        world.covers.delete(id);
+      }
       robot.cooldowns.set("attack", GRENADE_COOLDOWN);
       robot.energy = Math.max(0, robot.energy - GRENADE_ENERGY_COST);
       robot.heading = normalize(sub(targetPos, robot.position));

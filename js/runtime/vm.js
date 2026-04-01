@@ -22,6 +22,8 @@ export class VM {
     this.callStack = [];
     this.actions = [];
     this.iterStack = [];
+    this.timers = []; // { triggerTick, bodyOffset, repeat, interval }
+    this.currentTick = 0;
 
     // Initialize state slots with default values
     this.stateSlots = program.stateSlots.map(s => s.initialValue);
@@ -30,7 +32,9 @@ export class VM {
   }
 
   /** Execute an event handler */
-  executeEvent(eventType, event) {
+  executeEvent(eventType, event, currentTick) {
+    if (currentTick !== undefined) this.currentTick = currentTick;
+
     const offset = this.program.eventHandlers.get(eventType);
     if (offset === undefined) {
       return { actions: [], budgetExceeded: false };
@@ -277,6 +281,35 @@ export class VM {
             break;
           }
 
+          // Timers
+          case Op.SCHEDULE_ONCE: {
+            const bodyEnd = this.readU16();
+            const delay = Math.max(1, this.popNum());
+            const bodyStart = this.ip; // body begins right after the opcode+operand
+            this.timers.push({
+              triggerTick: this.currentTick + delay,
+              bodyOffset: bodyStart,
+              repeat: false,
+              interval: 0,
+            });
+            this.ip = bodyEnd; // skip past the body
+            break;
+          }
+
+          case Op.SCHEDULE_REPEAT: {
+            const bodyEnd = this.readU16();
+            const interval = Math.max(1, this.popNum());
+            const bodyStart = this.ip;
+            this.timers.push({
+              triggerTick: this.currentTick + interval,
+              bodyOffset: bodyStart,
+              repeat: true,
+              interval,
+            });
+            this.ip = bodyEnd;
+            break;
+          }
+
           // Stack
           case Op.POP: this.pop(); break;
           case Op.DUP: { const v = this.peek(); this.push(v); break; }
@@ -347,9 +380,18 @@ export class VM {
     if (args.length > 0) {
       const arg = args[0];
       if (typeof arg === "string") {
-        // Could be entity ID or ability name
+        // String args: signal data, waypoint names, ability names, entity IDs
         if (actionName === "use_ability") {
           intent.ability = arg;
+        } else if (actionName === "send_signal" || actionName === "mark_position") {
+          intent.data = arg;
+        } else {
+          intent.target = arg;
+        }
+      } else if (typeof arg === "number") {
+        // Numeric args (e.g. send_signal with numeric data)
+        if (actionName === "send_signal") {
+          intent.data = arg;
         } else {
           intent.target = arg;
         }
@@ -360,6 +402,11 @@ export class VM {
         };
       } else if (arg && typeof arg === "object" && "id" in arg) {
         intent.target = arg.id;
+      } else if (arg !== null && arg !== undefined) {
+        // For send_signal with any other value type
+        if (actionName === "send_signal") {
+          intent.data = arg;
+        }
       }
     }
 
@@ -377,6 +424,43 @@ export class VM {
       }
     }
     return obj;
+  }
+
+  /** Execute any timers that have fired at the given tick */
+  executeTimers(tick) {
+    this.currentTick = tick;
+    const allActions = [];
+    const firedIndices = [];
+
+    for (let i = 0; i < this.timers.length; i++) {
+      const timer = this.timers[i];
+      if (tick >= timer.triggerTick) {
+        // Execute the timer body
+        this.ip = timer.bodyOffset;
+        this.stack = [];
+        this.actions = [];
+        this.budget.reset();
+        this.callStack = [];
+        this.iterStack = [];
+        this.localBase = 0;
+
+        const result = this.run();
+        allActions.push(...result.actions);
+
+        if (timer.repeat) {
+          timer.triggerTick = tick + timer.interval;
+        } else {
+          firedIndices.push(i);
+        }
+      }
+    }
+
+    // Remove one-shot timers that fired (reverse order to preserve indices)
+    for (let i = firedIndices.length - 1; i >= 0; i--) {
+      this.timers.splice(firedIndices[i], 1);
+    }
+
+    return allActions;
   }
 
   /** Set the constant pool directly (used by the match runner) */

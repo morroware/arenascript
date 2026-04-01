@@ -10,7 +10,24 @@ import { resolveMovement, applyMovement, resolveCollisions } from "./movement.js
 import { resolveCombat, updateProjectiles, updateCooldowns, applyDamage } from "./combat.js";
 import { VisibilityTracker, checkCooldownReady } from "./events.js";
 import { ReplayWriter } from "./replay.js";
-import { CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS, HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE } from "../shared/config.js";
+import {
+  CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS,
+  HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE,
+  HAZARD_ZONE_RADIUS, HAZARD_DAMAGE_PER_TICK,
+  MIN_COVER_COUNT, MAX_COVER_COUNT,
+  MIN_HEAL_ZONES, MAX_HEAL_ZONES,
+  MIN_HAZARD_ZONES, MAX_HAZARD_ZONES,
+  SPAWN_CLEAR_RADIUS, CLASS_STATS, DEFAULT_VISION_RANGE,
+  MINE_DAMAGE, MINE_TRIGGER_RADIUS, MINE_MAX_PER_ROBOT, MINE_COOLDOWN, MINE_ENERGY_COST,
+  PICKUP_SPAWN_INTERVAL, PICKUP_MAX_ACTIVE, PICKUP_COLLECT_RADIUS,
+  PICKUP_EFFECT_DURATION, PICKUP_SPEED_MULTIPLIER, PICKUP_DAMAGE_MULTIPLIER,
+  PICKUP_VISION_BONUS, PICKUP_ENERGY_RESTORE,
+  NOISE_ATTACK_RADIUS, NOISE_MOVE_RADIUS, NOISE_GRENADE_RADIUS, NOISE_DECAY_TICKS,
+  SIGNAL_RANGE, SIGNAL_COOLDOWN,
+  OVERWATCH_DURATION, OVERWATCH_COOLDOWN, OVERWATCH_ENERGY_COST,
+  TAUNT_DURATION, TAUNT_COOLDOWN, TAUNT_RANGE, TAUNT_ENERGY_COST,
+  DESTRUCTIBLE_COVER_RATIO,
+} from "../shared/config.js";
 import { distance, vec2 } from "../shared/vec2.js";
 
 /**
@@ -80,9 +97,10 @@ export function runMatch(setup) {
     }
   }
 
-  // Create replay writer
+  // Create replay writer and capture the procedural arena layout
   const matchId = `match_${config.seed}_${Date.now()}`;
   const replayWriter = new ReplayWriter(matchId, config.seed, matchParticipants);
+  replayWriter.captureArenaLayout(world);
 
   // Execute spawn handlers
   for (const [robotId, vm] of robotVMs) {
@@ -109,6 +127,36 @@ export function runMatch(setup) {
       }
     }
 
+    // Phase 1b: Execute VM timers (after/every blocks)
+    for (const [robotId, vm] of robotVMs) {
+      const robot = world.getRobot(robotId);
+      if (!robot || !robot.alive) continue;
+      const timerActions = vm.executeTimers(tick);
+      // Timer actions get processed as utility actions
+      for (const action of timerActions) {
+        resolveUtilityAction(world, robot, action, robotStats);
+      }
+    }
+
+    // Phase 1c: Spawn pickups periodically
+    if (tick > 0 && tick % PICKUP_SPAWN_INTERVAL === 0) {
+      spawnRandomPickup(world);
+    }
+
+    // Phase 1d: Expire taunt/overwatch/effects
+    for (const robot of world.getAliveRobots()) {
+      if (robot.tauntedBy && tick >= robot.tauntExpiresTick) {
+        robot.tauntedBy = null;
+      }
+      if (robot.overwatchActive && tick >= robot.overwatchExpiresTick) {
+        robot.overwatchActive = false;
+      }
+      robot.activeEffects = robot.activeEffects.filter(e => tick < e.expiresTick);
+    }
+
+    // Phase 1e: Decay old noise events
+    world.noiseEvents = world.noiseEvents.filter(n => tick - n.tick <= NOISE_DECAY_TICKS);
+
     // Phase 2: Build sensor views (handled lazily by sensor gateway)
     // Phase 3 & 4: Execute robot programs and collect action intents
     const movementActions = new Map();
@@ -118,8 +166,11 @@ export function runMatch(setup) {
       const robot = world.getRobot(robotId);
       if (!robot || !robot.alive) continue;
 
+      // Overwatch prevents movement actions
+      const inOverwatch = robot.overwatchActive && tick < robot.overwatchExpiresTick;
+
       // Execute tick handler
-      const result = vm.executeEvent("tick");
+      const result = vm.executeEvent("tick", undefined, tick);
 
       if (result.budgetExceeded) {
         const stats = robotStats.get(robotId);
@@ -129,8 +180,14 @@ export function runMatch(setup) {
       // Validate and categorize actions
       if (result.actions.length > 0) {
         const { movement, combat, utility } = categorizeActions(result.actions);
+
+        // Process utility actions (place_mine, send_signal, mark_position, taunt, overwatch)
+        if (utility) {
+          resolveUtilityAction(world, robot, utility, robotStats);
+        }
+
         // Store primary actions
-        if (movement) {
+        if (movement && !inOverwatch) {
           const validated = validateAction(movement, robot);
           if (validated.valid) {
             movementActions.set(robotId, movement);
@@ -158,17 +215,43 @@ export function runMatch(setup) {
     }
     resolveCollisions(world);
 
-    // Phase 7: Resolve attacks and abilities
+    // Phase 7: Resolve attacks and abilities (+ generate noise)
     for (const robot of world.getAliveRobots()) {
       const combatAction = combatActions.get(robot.id);
       if (combatAction && ["attack", "fire_at", "burst_fire", "grenade", "use_ability", "shield"].includes(combatAction.type)) {
         resolveCombat(world, robot, combatAction);
+        // Generate noise from combat
+        if (combatAction.type === "grenade") {
+          world.addNoise(robot.position, NOISE_GRENADE_RADIUS, robot.id, tick);
+        } else if (["attack", "fire_at", "burst_fire"].includes(combatAction.type)) {
+          world.addNoise(robot.position, NOISE_ATTACK_RADIUS, robot.id, tick);
+        }
+      }
+      // Generate movement noise
+      if (movementActions.has(robot.id)) {
+        const moveType = movementActions.get(robot.id).type;
+        if (moveType !== "stop" && moveType !== "turn_left" && moveType !== "turn_right") {
+          world.addNoise(robot.position, NOISE_MOVE_RADIUS, robot.id, tick);
+        }
       }
     }
 
-    // Phase 8: Apply damage/effects (projectiles)
+    // Phase 7b: Detonate mines
+    detonateMines(world);
+
+    // Phase 7c: Collect pickups
+    collectPickups(world, tick);
+
+    // Phase 8: Apply damage/effects (projectiles, zones)
     updateProjectiles(world);
     applyHealingZones(world);
+    applyHazardZones(world);
+
+    // Phase 8b: Update robot discovery memory for nearby map features
+    updateDiscovery(world);
+
+    // Phase 8c: Dispatch signals to allies
+    dispatchSignals(world, robotVMs);
 
     // Update capture points
     for (const cp of world.controlPoints.values()) {
@@ -215,6 +298,9 @@ export function runMatch(setup) {
         const killedBy = event.data.killedBy;
         const killerStats = robotStats.get(killedBy);
         if (killerStats) killerStats.kills++;
+        // Also update the robot's own kill counter for the kills() sensor
+        const killerRobot = world.getRobot(killedBy);
+        if (killerRobot) killerRobot.kills = (killerRobot.kills ?? 0) + 1;
       }
     }
 
@@ -270,35 +356,121 @@ export function runMatch(setup) {
 
 function initializeArenaLayout(world) {
   const { arenaWidth: w, arenaHeight: h } = world.config;
+  const rng = world.rng;
 
-  // Multi-point objective map: encourages rotation instead of center camping.
-  world.addControlPoint(vec2(w * 0.20, h * 0.50), CAPTURE_RADIUS);
-  world.addControlPoint(vec2(w * 0.50, h * 0.50), CAPTURE_RADIUS);
-  world.addControlPoint(vec2(w * 0.80, h * 0.50), CAPTURE_RADIUS);
+  // Spawn zones to keep clear
+  const spawnZones = [
+    vec2(w * 0.10, h * 0.50), // team 0
+    vec2(w * 0.90, h * 0.50), // team 1
+  ];
 
-  // Central wall with two pass-through lanes creates meaningful chokepoints.
-  world.addCover(vec2(w * 0.50, h * 0.18), 8, 18);
-  world.addCover(vec2(w * 0.50, h * 0.82), 8, 18);
-
-  // Side anchors for flank-vs-mid decision making.
-  world.addCover(vec2(w * 0.33, h * 0.50), 6, 10);
-  world.addCover(vec2(w * 0.67, h * 0.50), 6, 10);
-
-  // Larger arenas get additional seeded terrain and sustain objectives.
-  if (w >= 120 || h >= 120) {
-    for (let i = 0; i < 2; i++) {
-      const x = i === 0
-        ? world.rng.nextFloat(w * 0.18, w * 0.35)
-        : world.rng.nextFloat(w * 0.65, w * 0.82);
-      const y = world.rng.nextFloat(h * 0.28, h * 0.72);
-      const width = world.rng.nextFloat(3, 7);
-      const height = world.rng.nextFloat(3, 7);
-      world.addCover(vec2(x, y), width, height);
+  function isTooCloseToSpawn(pos) {
+    for (const sp of spawnZones) {
+      if (distance(pos, sp) < SPAWN_CLEAR_RADIUS) return true;
     }
+    return false;
+  }
 
-    // Risk/reward sustain zones pull teams into dynamic map control choices.
-    world.addHealingZone(vec2(w * 0.25, h * 0.25), HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE);
-    world.addHealingZone(vec2(w * 0.75, h * 0.75), HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE);
+  function isTooCloseToExisting(pos, minDist, collection) {
+    for (const item of collection.values()) {
+      if (distance(pos, item.position) < minDist) return true;
+    }
+    return false;
+  }
+
+  // --- Control Points (2-3, spread across the map) ---
+  const cpCount = 2 + Math.floor(rng.nextFloat(0, 2));
+  const cpSlots = [];
+  // Divide map into horizontal slices for control points to ensure spread
+  for (let i = 0; i < cpCount; i++) {
+    const sliceWidth = w / cpCount;
+    const minX = sliceWidth * i + sliceWidth * 0.2;
+    const maxX = sliceWidth * (i + 1) - sliceWidth * 0.2;
+    const x = rng.nextFloat(Math.max(12, minX), Math.min(w - 12, maxX));
+    const y = rng.nextFloat(h * 0.25, h * 0.75);
+    const pos = vec2(x, y);
+    if (!isTooCloseToSpawn(pos)) {
+      world.addControlPoint(pos, CAPTURE_RADIUS);
+      cpSlots.push(pos);
+    }
+  }
+  // Always ensure at least one center-ish control point
+  if (cpSlots.length === 0) {
+    const pos = vec2(w * 0.5, h * 0.5);
+    world.addControlPoint(pos, CAPTURE_RADIUS);
+    cpSlots.push(pos);
+  }
+
+  // --- Cover Objects (procedurally placed, varied sizes) ---
+  const coverCount = MIN_COVER_COUNT + Math.floor(rng.nextFloat(0, MAX_COVER_COUNT - MIN_COVER_COUNT + 1));
+  for (let i = 0; i < coverCount; i++) {
+    // Try up to 10 times to place without overlapping spawn zones
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const x = rng.nextFloat(8, w - 8);
+      const y = rng.nextFloat(8, h - 8);
+      const pos = vec2(x, y);
+      if (isTooCloseToSpawn(pos)) continue;
+      if (isTooCloseToExisting(pos, 8, world.covers)) continue;
+
+      // Varied shapes: narrow walls, wide barricades, pillars
+      const shapeRoll = rng.nextFloat(0, 1);
+      let cw, ch;
+      if (shapeRoll < 0.3) {
+        // Tall wall
+        cw = rng.nextFloat(2, 4);
+        ch = rng.nextFloat(8, 16);
+      } else if (shapeRoll < 0.6) {
+        // Wide barricade
+        cw = rng.nextFloat(8, 14);
+        ch = rng.nextFloat(2, 4);
+      } else if (shapeRoll < 0.85) {
+        // Medium block
+        cw = rng.nextFloat(4, 8);
+        ch = rng.nextFloat(4, 8);
+      } else {
+        // Pillar
+        cw = rng.nextFloat(2, 4);
+        ch = rng.nextFloat(2, 4);
+      }
+
+      const isDestructible = rng.nextFloat(0, 1) < DESTRUCTIBLE_COVER_RATIO;
+      world.addCover(pos, cw, ch, isDestructible);
+      break;
+    }
+  }
+
+  // --- Healing Zones (scattered, never near spawns) ---
+  const healCount = MIN_HEAL_ZONES + Math.floor(rng.nextFloat(0, MAX_HEAL_ZONES - MIN_HEAL_ZONES + 1));
+  for (let i = 0; i < healCount; i++) {
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const x = rng.nextFloat(12, w - 12);
+      const y = rng.nextFloat(12, h - 12);
+      const pos = vec2(x, y);
+      if (isTooCloseToSpawn(pos)) continue;
+      if (isTooCloseToExisting(pos, 12, world.healingZones)) continue;
+
+      const radius = rng.nextFloat(HEAL_ZONE_RADIUS * 0.7, HEAL_ZONE_RADIUS * 1.3);
+      world.addHealingZone(pos, radius, HEAL_ZONE_TICK_RATE);
+      break;
+    }
+  }
+
+  // --- Hazard Zones (dangerous areas to avoid or navigate around) ---
+  const hazardCount = MIN_HAZARD_ZONES + Math.floor(rng.nextFloat(0, MAX_HAZARD_ZONES - MIN_HAZARD_ZONES + 1));
+  for (let i = 0; i < hazardCount; i++) {
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const x = rng.nextFloat(15, w - 15);
+      const y = rng.nextFloat(15, h - 15);
+      const pos = vec2(x, y);
+      if (isTooCloseToSpawn(pos)) continue;
+      if (isTooCloseToExisting(pos, 10, world.hazards)) continue;
+      // Don't overlap healing zones
+      if (isTooCloseToExisting(pos, 8, world.healingZones)) continue;
+
+      const radius = rng.nextFloat(HAZARD_ZONE_RADIUS * 0.8, HAZARD_ZONE_RADIUS * 1.4);
+      world.addHazard(pos, radius, HAZARD_DAMAGE_PER_TICK);
+      break;
+    }
   }
 }
 
@@ -312,6 +484,64 @@ function applyHealingZones(world) {
   }
 }
 
+function applyHazardZones(world) {
+  for (const hazard of world.hazards.values()) {
+    for (const robot of world.getAliveRobots()) {
+      if (distance(robot.position, hazard.position) <= hazard.radius) {
+        applyDamage(world, robot, hazard.damagePerTick, "hazard");
+      }
+    }
+  }
+}
+
+/** Update each robot's discovery memory with nearby map features */
+function updateDiscovery(world) {
+  for (const robot of world.getAliveRobots()) {
+    const visionRange = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
+
+    for (const cover of world.covers.values()) {
+      if (distance(robot.position, cover.position) <= visionRange) {
+        robot.memory.discoveredCovers.set(cover.id, {
+          id: cover.id,
+          position: { x: cover.position.x, y: cover.position.y },
+          width: cover.width,
+          height: cover.height,
+        });
+      }
+    }
+
+    for (const zone of world.healingZones.values()) {
+      if (distance(robot.position, zone.position) <= visionRange) {
+        robot.memory.discoveredHealZones.set(zone.id, {
+          id: zone.id,
+          position: { x: zone.position.x, y: zone.position.y },
+          radius: zone.radius,
+        });
+      }
+    }
+
+    for (const cp of world.controlPoints.values()) {
+      if (distance(robot.position, cp.position) <= visionRange) {
+        robot.memory.discoveredControlPoints.set(cp.id, {
+          id: cp.id,
+          position: { x: cp.position.x, y: cp.position.y },
+          owner: cp.owner,
+        });
+      }
+    }
+
+    for (const hazard of world.hazards.values()) {
+      if (distance(robot.position, hazard.position) <= visionRange) {
+        robot.memory.discoveredHazards.set(hazard.id, {
+          id: hazard.id,
+          position: { x: hazard.position.x, y: hazard.position.y },
+          radius: hazard.radius,
+        });
+      }
+    }
+  }
+}
+
 function getSpawnPositionForTeam(world, teamId, teamMemberIndex) {
   const { arenaWidth: w, arenaHeight: h } = world.config;
   const laneOffsets = [-12, -6, 0, 6, 12];
@@ -319,6 +549,154 @@ function getSpawnPositionForTeam(world, teamId, teamMemberIndex) {
   const x = teamId % 2 === 0 ? w * 0.10 : w * 0.90;
   const y = Math.max(6, Math.min(h - 6, (h * 0.50) + laneOffset));
   return vec2(x, y);
+}
+
+/** Resolve utility actions (place_mine, send_signal, mark_position, taunt, overwatch) */
+function resolveUtilityAction(world, robot, action, robotStats) {
+  switch (action.type) {
+    case "place_mine": {
+      if (robot.minesPlaced >= MINE_MAX_PER_ROBOT) break;
+      const cd = robot.cooldowns.get("mine") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < MINE_ENERGY_COST) break;
+      world.addMine(robot.id, robot.teamId, robot.position, MINE_DAMAGE);
+      robot.minesPlaced++;
+      robot.cooldowns.set("mine", MINE_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - MINE_ENERGY_COST);
+      break;
+    }
+    case "send_signal": {
+      if (world.currentTick < robot.signalCooldownTick) break;
+      world.pendingSignals.push({
+        senderId: robot.id,
+        teamId: robot.teamId,
+        data: action.data ?? null,
+        position: { x: robot.position.x, y: robot.position.y },
+        range: SIGNAL_RANGE,
+        tick: world.currentTick,
+      });
+      robot.signalCooldownTick = world.currentTick + SIGNAL_COOLDOWN;
+      break;
+    }
+    case "mark_position": {
+      const name = action.data;
+      if (!name || typeof name !== "string") break;
+      robot.memory.waypoints.set(name, { x: robot.position.x, y: robot.position.y });
+      break;
+    }
+    case "taunt": {
+      const cd = robot.cooldowns.get("taunt") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < TAUNT_ENERGY_COST) break;
+      // Taunt nearest visible enemy
+      const enemies = [];
+      for (const other of world.robots.values()) {
+        if (!other.alive || other.teamId === robot.teamId) continue;
+        if (distance(robot.position, other.position) <= TAUNT_RANGE) {
+          enemies.push(other);
+        }
+      }
+      if (enemies.length > 0) {
+        enemies.sort((a, b) => distance(robot.position, a.position) - distance(robot.position, b.position));
+        const target = enemies[0];
+        target.tauntedBy = robot.id;
+        target.tauntExpiresTick = world.currentTick + TAUNT_DURATION;
+        robot.cooldowns.set("taunt", TAUNT_COOLDOWN);
+        robot.energy = Math.max(0, robot.energy - TAUNT_ENERGY_COST);
+      }
+      break;
+    }
+    case "overwatch": {
+      const cd = robot.cooldowns.get("overwatch") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < OVERWATCH_ENERGY_COST) break;
+      robot.overwatchActive = true;
+      robot.overwatchExpiresTick = world.currentTick + OVERWATCH_DURATION;
+      robot.cooldowns.set("overwatch", OVERWATCH_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - OVERWATCH_ENERGY_COST);
+      break;
+    }
+  }
+}
+
+/** Detonate mines when enemies step on them */
+function detonateMines(world) {
+  const toRemove = [];
+  for (const [id, mine] of world.mines) {
+    for (const robot of world.getAliveRobots()) {
+      if (robot.teamId === mine.teamId) continue;
+      if (distance(robot.position, mine.position) <= MINE_TRIGGER_RADIUS) {
+        applyDamage(world, robot, mine.damage, mine.ownerId);
+        toRemove.push(id);
+        break;
+      }
+    }
+  }
+  for (const id of toRemove) {
+    world.mines.delete(id);
+  }
+}
+
+/** Check if robots are standing on pickups and apply effects */
+function collectPickups(world, tick) {
+  const toRemove = [];
+  for (const [id, pickup] of world.pickups) {
+    if (pickup.collected) continue;
+    for (const robot of world.getAliveRobots()) {
+      if (distance(robot.position, pickup.position) <= PICKUP_COLLECT_RADIUS) {
+        pickup.collected = true;
+        toRemove.push(id);
+        // Apply pickup effect
+        switch (pickup.type) {
+          case "energy":
+            robot.energy = Math.min(robot.maxEnergy, robot.energy + PICKUP_ENERGY_RESTORE);
+            break;
+          case "speed":
+          case "damage":
+          case "vision":
+            robot.activeEffects.push({ type: pickup.type, expiresTick: tick + PICKUP_EFFECT_DURATION });
+            break;
+        }
+        break;
+      }
+    }
+  }
+  for (const id of toRemove) {
+    world.pickups.delete(id);
+  }
+}
+
+/** Spawn a random pickup at a random location */
+function spawnRandomPickup(world) {
+  if (world.pickups.size >= PICKUP_MAX_ACTIVE) return;
+  const { arenaWidth: w, arenaHeight: h } = world.config;
+  const types = ["energy", "speed", "damage", "vision"];
+  const type = types[Math.floor(world.rng.nextFloat(0, types.length))];
+  const x = world.rng.nextFloat(10, w - 10);
+  const y = world.rng.nextFloat(10, h - 10);
+  world.addPickup({ x, y }, type);
+}
+
+/** Dispatch pending signals to ally robots as signal_received events */
+function dispatchSignals(world, robotVMs) {
+  for (const signal of world.pendingSignals) {
+    for (const robot of world.getAliveRobots()) {
+      if (robot.teamId !== signal.teamId) continue;
+      if (robot.id === signal.senderId) continue;
+      if (distance(robot.position, signal.position) > signal.range) continue;
+      world.emitEvent({
+        type: "signal_received",
+        tick: world.currentTick,
+        robotId: robot.id,
+        data: {
+          senderId: signal.senderId,
+          data: signal.data,
+          senderPosition: signal.position,
+        },
+      });
+    }
+  }
+  world.pendingSignals = [];
 }
 
 /** Check if a team has won by eliminating all opponents */

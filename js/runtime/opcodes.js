@@ -63,6 +63,10 @@ export const Op = Object.freeze({
   POP: 0xA0,           // discard top of stack
   DUP: 0xA1,           // duplicate top of stack
 
+  // Timers
+  SCHEDULE_ONCE: 0xB0,  // pop delay, register one-shot timer with body at operand offset
+  SCHEDULE_REPEAT: 0xB1, // pop interval, register repeating timer with body at operand offset
+
   // Program control
   HALT: 0xFF,
 });

@@ -9,6 +9,7 @@ export class ReplayWriter {
   #matchId;
   #seed;
   #participants;
+  #arenaLayout = null;
 
   constructor(matchId, seed, participants) {
     this.#matchId = matchId;
@@ -33,12 +34,51 @@ export class ReplayWriter {
       position: { x: p.position.x, y: p.position.y },
     }));
 
+    const mines = [...world.mines.values()].map(m => ({
+      id: m.id, teamId: m.teamId,
+      position: { x: m.position.x, y: m.position.y },
+    }));
+
+    const pickups = [...world.pickups.values()].filter(p => !p.collected).map(p => ({
+      id: p.id, type: p.type,
+      position: { x: p.position.x, y: p.position.y },
+    }));
+
+    // Track live cover state (for destructible cover changes)
+    const covers = [...world.covers.values()].map(c => ({
+      id: c.id, x: c.position.x, y: c.position.y,
+      w: c.width, h: c.height,
+      destructible: c.destructible, health: c.health,
+    }));
+
     this.#frames.push({
       tick: world.currentTick,
       robots,
       projectiles,
+      mines,
+      pickups,
+      covers,
       events: [...events],
     });
+  }
+
+  /** Store arena layout for rendering */
+  captureArenaLayout(world) {
+    this.#arenaLayout = {
+      covers: [...world.covers.values()].map(c => ({
+        x: c.position.x, y: c.position.y, w: c.width, h: c.height,
+        destructible: c.destructible ?? false,
+      })),
+      controlPoints: [...world.controlPoints.values()].map(cp => ({
+        x: cp.position.x, y: cp.position.y, radius: cp.radius,
+      })),
+      healingZones: [...world.healingZones.values()].map(hz => ({
+        x: hz.position.x, y: hz.position.y, radius: hz.radius,
+      })),
+      hazards: [...world.hazards.values()].map(h => ({
+        x: h.position.x, y: h.position.y, radius: h.radius,
+      })),
+    };
   }
 
   /** Finalize and return the complete replay data */
@@ -50,6 +90,7 @@ export class ReplayWriter {
         seed: this.#seed,
         tickCount: this.#frames.length,
         participants: this.#participants,
+        arenaLayout: this.#arenaLayout ?? null,
       },
       frames: this.#frames,
     };

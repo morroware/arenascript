@@ -30,6 +30,8 @@ export const TokenType = Object.freeze({
   Null_KW: "Null_KW",
   True: "True",
   False: "False",
+  After: "After",
+  Every: "Every",
 
   // Punctuation
   LeftBrace: "LeftBrace",
@@ -82,6 +84,8 @@ const KEYWORDS = {
   null: TokenType.Null_KW,
   true: TokenType.True,
   false: TokenType.False,
+  after: TokenType.After,
+  every: TokenType.Every,
 };
 
 export class LexerError extends Error {

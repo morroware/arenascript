@@ -4,7 +4,11 @@
 
 import { SeededRNG } from "../shared/prng.js";
 import { vec2 } from "../shared/vec2.js";
-import { ROBOT_BASE_HEALTH, ROBOT_BASE_ENERGY, CLASS_STATS } from "../shared/config.js";
+import {
+  ROBOT_BASE_HEALTH, ROBOT_BASE_ENERGY, CLASS_STATS,
+  HAZARD_DAMAGE_PER_TICK, HAZARD_ZONE_RADIUS,
+  DESTRUCTIBLE_COVER_HP,
+} from "../shared/config.js";
 
 let nextId = 0;
 export function generateId(prefix) {
@@ -23,6 +27,10 @@ export class World {
   healingZones = new Map();
   covers = new Map();
   hazards = new Map();
+  mines = new Map();
+  pickups = new Map();
+  noiseEvents = [];   // { position, radius, sourceName, tick }
+  pendingSignals = []; // { senderId, teamId, data, position, range, tick }
   currentTick = 0;
   config;
   rng;
@@ -73,6 +81,12 @@ export class World {
       cooldowns: new Map(),
       memory: {
         lastSeenEnemy: null,
+        discoveredCovers: new Map(),
+        discoveredHealZones: new Map(),
+        discoveredControlPoints: new Map(),
+        discoveredHazards: new Map(),
+        spawnPosition: { x: pos.x, y: pos.y },
+        waypoints: new Map(),  // named positions: string -> {x, y}
       },
       alive: true,
       teamId,
@@ -80,6 +94,16 @@ export class World {
       squadIndex,
       squadSize,
       squadRole,
+      // --- Extended state ---
+      kills: 0,
+      spawnTick: 0,
+      minesPlaced: 0,
+      tauntedBy: null,      // robotId that taunted this robot
+      tauntExpiresTick: 0,
+      overwatchActive: false,
+      overwatchExpiresTick: 0,
+      activeEffects: [],     // pickup effects: { type, expiresTick }
+      signalCooldownTick: 0,
     };
 
     this.robots.set(id, robot);
@@ -100,9 +124,13 @@ export class World {
     return cp;
   }
 
-  addCover(position, width, height) {
+  addCover(position, width, height, destructible = false) {
     const id = generateId("cover");
-    const cover = { id, position, width, height };
+    const cover = {
+      id, position, width, height,
+      destructible,
+      health: destructible ? DESTRUCTIBLE_COVER_HP : Infinity,
+    };
     this.covers.set(id, cover);
     return cover;
   }
@@ -112,6 +140,31 @@ export class World {
     const zone = { id, position, radius, healPerTick };
     this.healingZones.set(id, zone);
     return zone;
+  }
+
+  addHazard(position, radius = HAZARD_ZONE_RADIUS, damagePerTick = HAZARD_DAMAGE_PER_TICK) {
+    const id = generateId("hazard");
+    const hazard = { id, position, radius, damagePerTick };
+    this.hazards.set(id, hazard);
+    return hazard;
+  }
+
+  addMine(ownerId, teamId, position, damage) {
+    const id = generateId("mine");
+    const mine = { id, ownerId, teamId, position: { ...position }, damage };
+    this.mines.set(id, mine);
+    return mine;
+  }
+
+  addPickup(position, type) {
+    const id = generateId("pickup");
+    const pickup = { id, position: { ...position }, type, collected: false };
+    this.pickups.set(id, pickup);
+    return pickup;
+  }
+
+  addNoise(position, radius, sourceName, tick) {
+    this.noiseEvents.push({ position: { ...position }, radius, sourceName, tick });
   }
 
   getRobot(id) {

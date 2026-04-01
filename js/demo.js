@@ -12,26 +12,28 @@ import { LobbyManager } from "./server/lobby.js";
 // Example Bots
 // ============================================================================
 const AGGRESSOR_BOT = `
-robot "Bruiser" version "1.0"
+robot "Bruiser" version "2.0"
 
 meta {
   author: "Player1"
   class: "brawler"
 }
 
-const {
-  ENGAGE_RANGE = 8
-}
-
 state {
-  mode: string = "hunt"
+  ticks_moving: number = 0
 }
 
 on spawn {
-  set mode = "hunt"
+  set ticks_moving = 0
 }
 
 on tick {
+  if is_in_hazard() {
+    turn_right
+    move_forward
+    return
+  }
+
   let enemy = nearest_enemy()
   if enemy != null {
     if can_attack(enemy) {
@@ -39,17 +41,32 @@ on tick {
     } else {
       move_toward enemy.position
     }
+    return
+  }
+
+  set ticks_moving = ticks_moving + 1
+  if wall_ahead(3) {
+    turn_right
+    set ticks_moving = 0
+  } else if ticks_moving > 25 {
+    turn_left
+    set ticks_moving = 0
   } else {
-    move_to nearest_enemy_control_point()
+    move_forward
   }
 }
 
 on damaged(event) {
-  set mode = "fight"
+  if health() < 40 {
+    let heal = nearest_heal_zone()
+    if heal != null {
+      move_to heal.position
+    }
+  }
 }
 `;
 const KITER_BOT = `
-robot "Kiter" version "1.0"
+robot "Kiter" version "2.0"
 
 meta {
   author: "Player2"
@@ -57,12 +74,10 @@ meta {
 }
 
 const {
-  SAFE_HEALTH = 30
-  ATTACK_RANGE = 7
+  SAFE_HEALTH = 35
 }
 
 state {
-  target_id: id? = null
   retreating: boolean = false
 }
 
@@ -71,15 +86,34 @@ on spawn {
 }
 
 on tick {
+  if is_in_hazard() {
+    move_forward
+    return
+  }
+
   let enemy = nearest_enemy()
 
   if enemy == null {
-    move_to nearest_enemy_control_point()
+    let cp = nearest_control_point()
+    if cp != null {
+      move_to cp.position
+    } else {
+      if wall_ahead(4) {
+        turn_right
+      } else {
+        move_forward
+      }
+    }
     return
   }
 
   if health() < SAFE_HEALTH {
     set retreating = true
+    let heal = nearest_heal_zone()
+    if heal != null {
+      move_to heal.position
+      return
+    }
     retreat
     return
   }
@@ -87,7 +121,7 @@ on tick {
   set retreating = false
 
   if can_attack(enemy) {
-    attack enemy
+    fire_at enemy.position
   } else {
     move_toward enemy.position
   }
@@ -98,28 +132,36 @@ on low_health {
 }
 `;
 const TANK_BOT = `
-robot "Fortress" version "1.0"
+robot "Fortress" version "2.0"
 
 meta {
   author: "Player3"
   class: "tank"
 }
 
-on spawn {
-  move_to nearest_enemy_control_point()
-}
-
 on tick {
+  if is_in_hazard() {
+    move_forward
+    return
+  }
+
   let enemy = nearest_enemy()
   if enemy == null {
-    move_to nearest_enemy_control_point()
+    let cp = nearest_control_point()
+    if cp != null {
+      move_to cp.position
+    } else {
+      if wall_ahead(3) {
+        turn_left
+      } else {
+        move_forward
+      }
+    }
     return
   }
 
   if health() < 55 {
     shield
-    move_to nearest_enemy_control_point()
-    return
   }
 
   if can_attack(enemy) {
@@ -136,7 +178,7 @@ on damaged {
 }
 `;
 const SUPPORT_BOT = `
-robot "Healer" version "1.0"
+robot "Healer" version "2.0"
 
 meta {
   author: "Player4"
@@ -148,15 +190,39 @@ state {
 }
 
 on tick {
+  if is_in_hazard() {
+    move_forward
+    return
+  }
+
+  if is_in_heal_zone() and health() < max_health() {
+    stop
+    return
+  }
+
   let enemy = nearest_enemy()
 
   if enemy == null {
-    move_to nearest_enemy_control_point()
+    let cp = nearest_control_point()
+    if cp != null {
+      move_to cp.position
+    } else {
+      if wall_ahead(3) {
+        turn_right
+      } else {
+        move_forward
+      }
+    }
     return
   }
 
   if health() < 35 {
     set retreating = true
+    let heal = nearest_heal_zone()
+    if heal != null {
+      move_to heal.position
+      return
+    }
     retreat
     return
   }
@@ -172,7 +238,6 @@ on tick {
 
 on low_health {
   set retreating = true
-  retreat
 }
 `;
 // ============================================================================
