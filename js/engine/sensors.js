@@ -190,6 +190,19 @@ export function createSensorGateway(world) {
         return nearest;
       }
 
+      case "nearest_heal_zone": {
+        let nearestDist = Infinity;
+        let nearest = null;
+        for (const zone of world.healingZones.values()) {
+          const d = distance(robot.position, zone.position);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = { id: zone.id, position: { x: zone.position.x, y: zone.position.y }, radius: zone.radius };
+          }
+        }
+        return nearest;
+      }
+
       case "distance_to": {
         const target = args[0];
         if (!target) return 999;
@@ -223,6 +236,12 @@ export function createSensorGateway(world) {
 
       case "current_tick":
         return world.currentTick;
+      case "team_size":
+        return robot.squadSize ?? 1;
+      case "my_index":
+        return robot.squadIndex ?? 0;
+      case "my_role":
+        return robot.squadRole ?? "";
 
       case "scan": {
         const range = Math.max(0, Math.min(args[0] ?? ACTIVE_SCAN_RANGE, ACTIVE_SCAN_RANGE));

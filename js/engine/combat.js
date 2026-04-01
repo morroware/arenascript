@@ -7,6 +7,8 @@ import { getVisibleEnemies, hasLineOfSight } from "./los.js";
 import {
   CLASS_STATS, ATTACK_DAMAGE, ATTACK_RANGE, ATTACK_COOLDOWN, ATTACK_ENERGY_COST,
   FIRE_AT_DAMAGE, FIRE_AT_RANGE, FIRE_AT_COOLDOWN, PROJECTILE_SPEED, PROJECTILE_TTL,
+  BURST_FIRE_DAMAGE, BURST_FIRE_RANGE, BURST_FIRE_COOLDOWN,
+  GRENADE_DAMAGE, GRENADE_RADIUS, GRENADE_RANGE, GRENADE_COOLDOWN,
   SHIELD_DURATION, SHIELD_COOLDOWN, LOW_HEALTH_THRESHOLD,
 } from "../shared/config.js";
 
@@ -60,6 +62,42 @@ export function resolveCombat(world, robot, action) {
 
       robot.cooldowns.set("attack", FIRE_AT_COOLDOWN);
       robot.heading = dir;
+      break;
+    }
+
+    case "burst_fire": {
+      const targetPos = resolveTargetPosition(world, action);
+      if (!targetPos) break;
+      if (distance(robot.position, targetPos) > BURST_FIRE_RANGE) break;
+      const cd = robot.cooldowns.get("attack") ?? 0;
+      if (cd > 0) break;
+
+      const baseDir = normalize(sub(targetPos, robot.position));
+      const spread = [0, -0.12, 0.12];
+      for (const s of spread) {
+        const dir = normalize({ x: baseDir.x - (baseDir.y * s), y: baseDir.y + (baseDir.x * s) });
+        const vel = scale(dir, PROJECTILE_SPEED);
+        world.spawnProjectile(robot.id, { ...robot.position }, vel, BURST_FIRE_DAMAGE, PROJECTILE_TTL);
+      }
+      robot.cooldowns.set("attack", BURST_FIRE_COOLDOWN);
+      robot.heading = baseDir;
+      break;
+    }
+
+    case "grenade": {
+      const targetPos = resolveTargetPosition(world, action);
+      if (!targetPos) break;
+      if (distance(robot.position, targetPos) > GRENADE_RANGE) break;
+      const cd = robot.cooldowns.get("attack") ?? 0;
+      if (cd > 0) break;
+      for (const other of world.getAliveRobots()) {
+        if (other.teamId === robot.teamId) continue;
+        if (distance(other.position, targetPos) <= GRENADE_RADIUS) {
+          applyDamage(world, other, GRENADE_DAMAGE, robot.id);
+        }
+      }
+      robot.cooldowns.set("attack", GRENADE_COOLDOWN);
+      robot.heading = normalize(sub(targetPos, robot.position));
       break;
     }
 

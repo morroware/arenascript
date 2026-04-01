@@ -7,6 +7,7 @@ A deterministic robot arena combat engine with a custom domain-specific language
 - **Custom DSL** - ArenaScript language with lexer, parser, semantic analyzer, and bytecode compiler
 - **Sandboxed VM** - Stack-based bytecode interpreter with budget metering (prevents infinite loops)
 - **Deterministic Engine** - 11-phase tick-based simulation with seeded PRNG for reproducible matches
+- **Dynamic Arenas** - Seeded randomized cover layouts + healing zones for replay-safe map variety
 - **Live Visualization** - Canvas-based arena rendering with replay animation
 - **4 Robot Classes** - Brawler, Ranger, Tank, and Support with distinct stats
 - **Ranked System** - Elo-based matchmaking and rating tiers (Bronze through Champion)
@@ -156,8 +157,8 @@ on damaged(event) {
 | **Control Flow** | `if`/`else`, `for`...`in` loops, `return` |
 | **Operators** | `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `not` |
 | **Events** | `on spawn`, `on tick`, `on damaged`, `on low_health` |
-| **Commands** | `attack`, `fire_at`, `move_toward`, `move_to`, `move_forward`, `turn_left`, `retreat`, `shield` |
-| **Sensors** | `nearest_enemy()`, `scan()`, `scan_enemies()`, `enemy_visible()`, `wall_ahead()`, `random()`, `last_seen_enemy()`, `health()`, `energy()`, `can_attack()` |
+| **Commands** | `attack`, `fire_at`, `burst_fire`, `grenade`, `move_toward`, `move_to`, `move_forward`, `turn_left`, `retreat`, `shield` |
+| **Sensors** | `nearest_enemy()`, `scan()`, `scan_enemies()`, `enemy_visible()`, `wall_ahead()`, `nearest_heal_zone()`, `random()`, `last_seen_enemy()`, `health()`, `energy()`, `can_attack()` |
 | **Functions** | `fn name(params) { ... }` for custom functions |
 
 ### Robot Classes
@@ -189,7 +190,7 @@ The simulation runs a deterministic 11-phase tick loop:
 
 | Setting | Value |
 |---------|-------|
-| Arena Size | 100 x 100 units |
+| Arena Size | 140 x 140 units |
 | Tick Rate | 30 ticks/sec |
 | Max Match Duration | 3000 ticks (100 seconds) |
 | CPU Budget | 1000 instructions/tick/robot |

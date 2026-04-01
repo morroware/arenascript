@@ -19,7 +19,9 @@ export function validateAction(intent, robot) {
 
   switch (normalized.type) {
     case "attack":
-    case "fire_at": {
+    case "fire_at":
+    case "burst_fire":
+    case "grenade": {
       const cd = robot.cooldowns.get("attack") ?? 0;
       if (cd > 0) {
         return { intent: normalized, valid: false, reason: `Attack on cooldown (${cd} ticks remaining)` };
@@ -67,7 +69,7 @@ export function categorizeActions(actions) {
     "move_to", "move_toward", "move_forward", "move_backward",
     "turn_left", "turn_right", "strafe_left", "strafe_right", "stop", "retreat",
   ]);
-  const combatTypes = new Set(["attack", "fire_at", "use_ability", "shield"]);
+  const combatTypes = new Set(["attack", "fire_at", "burst_fire", "grenade", "use_ability", "shield"]);
 
   let movement = null;
   let combat = null;

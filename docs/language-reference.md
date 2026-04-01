@@ -29,6 +29,7 @@ Every ArenaScript program follows this structure:
 robot "<name>" version "<version>"
 
 meta { ... }      // Required: robot metadata
+squad { ... }     // Optional: team composition (1-5 bots from one script)
 const { ... }     // Optional: compile-time constants
 state { ... }     // Optional: persistent state variables
 
@@ -79,6 +80,29 @@ const {
 ```
 
 Constants are inlined at compile time and do not consume runtime budget.
+
+## Squad Block
+
+Use `squad` to spawn a coordinated mini-team from one ArenaScript program.
+
+```
+squad {
+  size: 3
+  roles: "anchor", "flank", "support"
+}
+```
+
+- `size` must be an integer from `1` to `5`.
+- `roles` is optional; if present, roles are assigned by index and repeated cyclically if needed.
+- Without `squad`, each participant spawns one robot (legacy behavior).
+
+### Team-aware Sensors
+
+| Sensor | Description |
+|--------|-------------|
+| `team_size()` | Returns the squad size for this script instance |
+| `my_index()` | Zero-based index of this robot inside the squad |
+| `my_role()` | Role string from `roles`, or empty string |
 
 ## State Block
 
@@ -286,6 +310,8 @@ Commands are actions your robot performs. Each has cooldowns and energy costs.
 | `shield` | Activate a damage shield (3 tick duration, 30 tick cooldown) |
 | `dash` | Quick movement burst (5.0 distance, 20 tick cooldown) |
 | `fire_at <target>` | Fire a projectile at a target (8 dmg, 15.0 range, 8 tick cooldown) |
+| `burst_fire <target>` | Fire a 3-shot spread volley (short-mid range pressure) |
+| `grenade <target>` | Detonate AoE damage around a target position |
 
 ## Built-in Sensors
 
@@ -300,6 +326,7 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `has_recent_enemy_contact(max_age?)` | boolean | Whether memory contains recent enemy contact |
 | `nearest_ally()` | entity or `null` | Closest visible ally |
 | `nearest_control_point()` | position | Nearest capture point |
+| `nearest_heal_zone()` | zone or `null` | Nearest healing zone with `position` and `radius` |
 | `health()` | number | Current health |
 | `energy()` | number | Current energy |
 | `can_attack(target)` | boolean | Whether target is visible, in range, and off cooldown |
@@ -310,6 +337,9 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `distance_to(position)` | number | Distance from robot to a position |
 | `visible_enemies()` | list | All enemies within line-of-sight |
 | `visible_allies()` | list | All allies within line-of-sight |
+| `team_size()` | number | Squad size for this script instance (1-5) |
+| `my_index()` | number | Zero-based squad index for this robot |
+| `my_role()` | string | Assigned squad role string (or empty string) |
 
 ### Entity Properties
 

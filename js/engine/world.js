@@ -20,6 +20,7 @@ export class World {
   projectiles = new Map();
   controlPoints = new Map();
   resources = new Map();
+  healingZones = new Map();
   covers = new Map();
   hazards = new Map();
   currentTick = 0;
@@ -38,6 +39,9 @@ export class World {
     teamId,
     programId,
     position,
+    squadIndex = 0,
+    squadSize = 1,
+    squadRole = null,
   ) {
     const id = generateId("robot");
     const stats = CLASS_STATS[robotClass] ?? {
@@ -73,6 +77,9 @@ export class World {
       alive: true,
       teamId,
       programId,
+      squadIndex,
+      squadSize,
+      squadRole,
     };
 
     this.robots.set(id, robot);
@@ -98,6 +105,13 @@ export class World {
     const cover = { id, position, width, height };
     this.covers.set(id, cover);
     return cover;
+  }
+
+  addHealingZone(position, radius, healPerTick = 2) {
+    const id = generateId("heal");
+    const zone = { id, position, radius, healPerTick };
+    this.healingZones.set(id, zone);
+    return zone;
   }
 
   getRobot(id) {
