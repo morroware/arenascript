@@ -44,8 +44,12 @@ export class MatchmakingQueue {
                 const p2 = this.queue[j];
                 if (p1.mode !== p2.mode)
                     continue;
+                // Also consider p2's wait time for range expansion (match if either side's range covers the gap)
+                const p2WaitTime = (now - p2.enqueuedAt) / 1000;
+                const p2EloRange = Math.min(ELO_RANGE_BASE + p2WaitTime * ELO_RANGE_EXPANSION_PER_SEC, MAX_ELO_RANGE);
+                const effectiveRange = Math.max(eloRange, p2EloRange);
                 const eloDiff = Math.abs(p1.elo - p2.elo);
-                if (eloDiff <= eloRange) {
+                if (eloDiff <= effectiveRange) {
                     // Match found — remove both from queue
                     this.queue.splice(j, 1);
                     this.queue.splice(i, 1);

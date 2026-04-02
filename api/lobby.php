@@ -101,7 +101,7 @@ class LobbyManager
         return $lobby;
     }
 
-    /** Leave a lobby */
+    /** Leave a lobby (cannot leave during an active match) */
     public function leaveLobby(string $lobbyId, string $playerId): bool
     {
         if (!isset($this->lobbies[$lobbyId])) {
@@ -109,6 +109,10 @@ class LobbyManager
         }
 
         $lobby = &$this->lobbies[$lobbyId];
+
+        if ($lobby['status'] === 'in_match') {
+            return false;
+        }
 
         $lobby['players'] = array_values(array_filter(
             $lobby['players'],
@@ -174,8 +178,8 @@ class LobbyManager
         return true;
     }
 
-    /** Start the match when all players are ready */
-    public function startMatch(string $lobbyId): ?array
+    /** Start the match when all players are ready (only host can start) */
+    public function startMatch(string $lobbyId, ?string $playerId = null): ?array
     {
         if (!isset($this->lobbies[$lobbyId])) {
             return null;
@@ -184,6 +188,11 @@ class LobbyManager
         $lobby = &$this->lobbies[$lobbyId];
 
         if ($lobby['status'] !== 'ready') {
+            return null;
+        }
+
+        // Only the host can start the match
+        if ($playerId !== null && $playerId !== $lobby['host']) {
             return null;
         }
 

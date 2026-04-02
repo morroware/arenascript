@@ -53,10 +53,12 @@ export class LobbyManager {
         });
         return lobby;
     }
-    /** Leave a lobby */
+    /** Leave a lobby (cannot leave during an active match) */
     leaveLobby(lobbyId, playerId) {
         const lobby = this.lobbies.get(lobbyId);
         if (!lobby)
+            return false;
+        if (lobby.status === "in_match")
             return false;
         lobby.players = lobby.players.filter(p => p.playerId !== playerId);
         if (lobby.players.length === 0) {
@@ -84,10 +86,13 @@ export class LobbyManager {
         }
         return true;
     }
-    /** Start the match when all players are ready */
-    startMatch(lobbyId) {
+    /** Start the match when all players are ready (only host can start) */
+    startMatch(lobbyId, playerId) {
         const lobby = this.lobbies.get(lobbyId);
         if (!lobby || lobby.status !== "ready")
+            return null;
+        // Only the host can start the match
+        if (playerId !== undefined && playerId !== lobby.host)
             return null;
         const readyPlayers = lobby.players
             .filter(p => p.program && p.constants)

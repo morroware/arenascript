@@ -281,6 +281,11 @@ export function runMatch(setup) {
         // Uncontested — one team capturing
         const capturingTeam = [...teamsInRange][0];
         if (cp.owner !== capturingTeam) {
+          // Reset progress if a different team starts capturing
+          if (cp.capturingTeam !== undefined && cp.capturingTeam !== capturingTeam) {
+            cp.captureProgress = 0;
+          }
+          cp.capturingTeam = capturingTeam;
           cp.captureProgress += CAPTURE_RATE;
           if (cp.captureProgress >= CAPTURE_WIN_THRESHOLD) {
             cp.owner = capturingTeam;
@@ -290,6 +295,9 @@ export function runMatch(setup) {
       } else if (teamsInRange.size > 1) {
         // Contested — progress decays toward zero
         cp.captureProgress = Math.max(0, cp.captureProgress - CAPTURE_RATE);
+      } else {
+        // No one in range — progress decays toward zero
+        cp.captureProgress = Math.max(0, cp.captureProgress - CAPTURE_RATE * 0.5);
       }
     }
 

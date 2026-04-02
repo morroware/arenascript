@@ -132,6 +132,8 @@ export class TournamentManager {
             else {
                 // Draw — in single elimination, give it to higher seed
                 match.winner = match.participant1Index;
+                tournament.participants[match.participant1Index].wins++;
+                tournament.participants[match.participant2Index].losses++;
                 if (tournament.format === "single_elimination") {
                     tournament.participants[match.participant2Index].eliminated = true;
                 }

@@ -33,8 +33,12 @@ export function resolveCombat(world, robot, action) {
       const cd = robot.cooldowns.get("attack") ?? 0;
       if (cd > 0) break;
 
-      const damage = stats?.attackDamage ?? ATTACK_DAMAGE;
+      let damage = stats?.attackDamage ?? ATTACK_DAMAGE;
       const cooldown = stats?.attackCooldown ?? ATTACK_COOLDOWN;
+      // Apply damage pickup effect
+      if (robot.activeEffects?.some(e => e.type === "damage")) {
+        damage = Math.round(damage * 1.4); // PICKUP_DAMAGE_MULTIPLIER
+      }
 
       applyDamage(world, target, damage, robot.id);
       robot.cooldowns.set("attack", cooldown);
@@ -58,9 +62,14 @@ export function resolveCombat(world, robot, action) {
 
       const dir = normalize(sub(targetPos, robot.position));
       const vel = scale(dir, PROJECTILE_SPEED);
-      world.spawnProjectile(robot.id, { ...robot.position }, vel, FIRE_AT_DAMAGE, PROJECTILE_TTL);
+      let fireAtDmg = FIRE_AT_DAMAGE;
+      if (robot.activeEffects?.some(e => e.type === "damage")) {
+        fireAtDmg = Math.round(fireAtDmg * 1.4);
+      }
+      world.spawnProjectile(robot.id, { ...robot.position }, vel, fireAtDmg, PROJECTILE_TTL);
 
       robot.cooldowns.set("attack", FIRE_AT_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - ATTACK_ENERGY_COST);
       robot.heading = dir;
       break;
     }
@@ -68,16 +77,21 @@ export function resolveCombat(world, robot, action) {
     case "burst_fire": {
       const targetPos = resolveTargetPosition(world, action);
       if (!targetPos) break;
+      if (!hasLineOfSight(world, robot.position, targetPos)) break;
       if (distance(robot.position, targetPos) > BURST_FIRE_RANGE) break;
       const cd = robot.cooldowns.get("attack") ?? 0;
       if (cd > 0) break;
 
       const baseDir = normalize(sub(targetPos, robot.position));
+      let burstDmg = BURST_FIRE_DAMAGE;
+      if (robot.activeEffects?.some(e => e.type === "damage")) {
+        burstDmg = Math.round(burstDmg * 1.4);
+      }
       const spread = [0, -0.12, 0.12];
       for (const s of spread) {
         const dir = normalize({ x: baseDir.x - (baseDir.y * s), y: baseDir.y + (baseDir.x * s) });
         const vel = scale(dir, PROJECTILE_SPEED);
-        world.spawnProjectile(robot.id, { ...robot.position }, vel, BURST_FIRE_DAMAGE, PROJECTILE_TTL);
+        world.spawnProjectile(robot.id, { ...robot.position }, vel, burstDmg, PROJECTILE_TTL);
       }
       robot.cooldowns.set("attack", BURST_FIRE_COOLDOWN);
       robot.energy = Math.max(0, robot.energy - BURST_FIRE_ENERGY_COST);
@@ -185,6 +199,22 @@ export function updateProjectiles(world) {
       continue;
     }
 
+    // Check collision with cover (projectiles blocked by walls)
+    let hitCover = false;
+    for (const cover of world.covers.values()) {
+      const halfW = cover.width / 2;
+      const halfH = cover.height / 2;
+      if (proj.position.x >= cover.position.x - halfW && proj.position.x <= cover.position.x + halfW &&
+          proj.position.y >= cover.position.y - halfH && proj.position.y <= cover.position.y + halfH) {
+        hitCover = true;
+        break;
+      }
+    }
+    if (hitCover) {
+      toRemove.push(id);
+      continue;
+    }
+
     // Check collision with robots
     for (const robot of world.robots.values()) {
       if (!robot.alive) continue;
@@ -234,8 +264,13 @@ function resolveTargetId(world, action) {
 
 function resolveTargetPosition(world, action) {
   if (!action.target) return null;
-  if (typeof action.target === "object" && "x" in action.target) {
+  if (typeof action.target === "object" && "x" in action.target && "y" in action.target) {
     return action.target;
+  }
+  // Sensor objects often include { id, position, ... }
+  if (typeof action.target === "object" && "position" in action.target &&
+      action.target.position && "x" in action.target.position && "y" in action.target.position) {
+    return action.target.position;
   }
   if (typeof action.target === "string") {
     const robot = world.getRobot(action.target);
