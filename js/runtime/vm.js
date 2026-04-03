@@ -261,7 +261,12 @@ export class VM {
             const prop = propConst && propConst.type === "string" ? propConst.value : "";
             const obj = this.pop();
             if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-              this.push(obj[prop] ?? null);
+              // Sandbox: block access to prototype-inherited properties
+              if (!Object.prototype.hasOwnProperty.call(obj, prop)) {
+                this.push(null);
+              } else {
+                this.push(obj[prop] ?? null);
+              }
             } else {
               this.push(null);
             }
@@ -270,6 +275,9 @@ export class VM {
 
           // Iteration
           case Op.ITER_START: {
+            if (this.iterStack.length >= VM.MAX_CALL_DEPTH) {
+              throw new Error("Iterator stack overflow: too many nested loops");
+            }
             const list = this.pop();
             if (Array.isArray(list)) {
               this.iterStack.push({ items: list, index: 0 });
@@ -364,7 +372,10 @@ export class VM {
   }
 
   peek() {
-    return this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
+    if (this.stack.length === 0) {
+      throw new Error("Stack underflow: attempted to peek at empty stack");
+    }
+    return this.stack[this.stack.length - 1];
   }
 
   popNum() {
@@ -432,13 +443,25 @@ export class VM {
   }
 
   eventToVMObject(event) {
-    const obj = {
-      type: event.type,
-      tick: event.tick,
-    };
+    const obj = Object.create(null);
+    obj.type = event.type;
+    obj.tick = event.tick;
     if (event.data) {
       for (const [k, v] of Object.entries(event.data)) {
-        obj[k] = v;
+        // Only allow primitives and plain objects into the VM
+        if (typeof v === "function" || typeof v === "symbol") continue;
+        if (typeof v === "object" && v !== null) {
+          // Shallow-clone plain objects to prevent reference leaks
+          const safe = Object.create(null);
+          for (const [pk, pv] of Object.entries(v)) {
+            if (typeof pv !== "function" && typeof pv !== "symbol") {
+              safe[pk] = pv;
+            }
+          }
+          obj[k] = safe;
+        } else {
+          obj[k] = v;
+        }
       }
     }
     return obj;

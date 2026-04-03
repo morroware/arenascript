@@ -92,7 +92,7 @@ export class LobbyManager {
         if (!lobby || lobby.status !== "ready")
             return null;
         // Only the host can start the match
-        if (playerId !== undefined && playerId !== lobby.host)
+        if (playerId != null && playerId !== lobby.host)
             return null;
         const readyPlayers = lobby.players
             .filter(p => p.program && p.constants)
@@ -119,6 +119,15 @@ export class LobbyManager {
         lobby.status = "completed";
         lobby.matchResult = response;
         return response;
+    }
+    /** Clean up completed/stale lobbies */
+    cleanup(maxAgeMs = 3600000) {
+        const now = Date.now();
+        for (const [id, lobby] of this.lobbies) {
+            if (lobby.status === "completed" || (now - lobby.createdAt > maxAgeMs)) {
+                this.lobbies.delete(id);
+            }
+        }
     }
     /** List open lobbies */
     listLobbies() {

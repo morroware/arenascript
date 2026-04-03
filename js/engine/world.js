@@ -62,10 +62,13 @@ export class World {
     };
 
     // Spawn at given position or random position within arena bounds
-    const pos = position ?? vec2(
-      this.rng.nextFloat(5, this.config.arenaWidth - 5),
-      this.rng.nextFloat(5, this.config.arenaHeight - 5),
-    );
+    // Clone provided position to prevent shared mutable references
+    const pos = position
+      ? { x: position.x, y: position.y }
+      : vec2(
+        this.rng.nextFloat(5, this.config.arenaWidth - 5),
+        this.rng.nextFloat(5, this.config.arenaHeight - 5),
+      );
 
     const robot = {
       id,

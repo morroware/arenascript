@@ -403,7 +403,7 @@ function initializeArenaLayout(world) {
   }
 
   // --- Control Points (2-3, spread across the map) ---
-  const cpCount = 2 + Math.floor(rng.nextFloat(0, 2));
+  const cpCount = rng.nextInt(2, 3);
   const cpSlots = [];
   // Divide map into horizontal slices for control points to ensure spread
   for (let i = 0; i < cpCount; i++) {
@@ -426,7 +426,7 @@ function initializeArenaLayout(world) {
   }
 
   // --- Cover Objects (procedurally placed, varied sizes) ---
-  const coverCount = MIN_COVER_COUNT + Math.floor(rng.nextFloat(0, MAX_COVER_COUNT - MIN_COVER_COUNT + 1));
+  const coverCount = rng.nextInt(MIN_COVER_COUNT, MAX_COVER_COUNT);
   for (let i = 0; i < coverCount; i++) {
     // Try up to 10 times to place without overlapping spawn zones
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -464,7 +464,7 @@ function initializeArenaLayout(world) {
   }
 
   // --- Healing Zones (scattered, never near spawns) ---
-  const healCount = MIN_HEAL_ZONES + Math.floor(rng.nextFloat(0, MAX_HEAL_ZONES - MIN_HEAL_ZONES + 1));
+  const healCount = rng.nextInt(MIN_HEAL_ZONES, MAX_HEAL_ZONES);
   for (let i = 0; i < healCount; i++) {
     for (let attempt = 0; attempt < 15; attempt++) {
       const x = rng.nextFloat(12, w - 12);
@@ -480,7 +480,7 @@ function initializeArenaLayout(world) {
   }
 
   // --- Hazard Zones (dangerous areas to avoid or navigate around) ---
-  const hazardCount = MIN_HAZARD_ZONES + Math.floor(rng.nextFloat(0, MAX_HAZARD_ZONES - MIN_HAZARD_ZONES + 1));
+  const hazardCount = rng.nextInt(MIN_HAZARD_ZONES, MAX_HAZARD_ZONES);
   for (let i = 0; i < hazardCount; i++) {
     for (let attempt = 0; attempt < 15; attempt++) {
       const x = rng.nextFloat(15, w - 15);
@@ -695,7 +695,7 @@ function spawnRandomPickup(world) {
   if (world.pickups.size >= PICKUP_MAX_ACTIVE) return;
   const { arenaWidth: w, arenaHeight: h } = world.config;
   const types = ["energy", "speed", "damage", "vision"];
-  const type = types[Math.floor(world.rng.nextFloat(0, types.length))];
+  const type = types[world.rng.nextInt(0, types.length - 1)];
   const x = world.rng.nextFloat(10, w - 10);
   const y = world.rng.nextFloat(10, h - 10);
   world.addPickup({ x, y }, type);

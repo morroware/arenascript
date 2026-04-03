@@ -7,7 +7,7 @@ import { ARENA_WIDTH, ARENA_HEIGHT, MAX_TICKS, TICK_RATE } from "../shared/confi
 export class TournamentManager {
     tournaments = new Map();
     createTournament(name, format, entries, seed = Date.now()) {
-        const id = `tournament_${seed}`;
+        const id = `tournament_${seed}_${Date.now()}`;
         const rng = new SeededRNG(seed);
         // Seed participants by Elo (highest first)
         const sorted = [...entries].sort((a, b) => b.elo - a.elo);
@@ -111,7 +111,7 @@ export class TournamentManager {
                 ],
             };
             const result = runMatch(setup);
-            match.matchId = `tmatch_${rng.nextInt(0, 999999)}`;
+            match.matchId = `tmatch_${rng.nextInt(0, 2147483647)}_${state.currentRound}`;
             match.completed = true;
             if (result.winner === 0) {
                 match.winner = match.participant1Index;
@@ -202,9 +202,9 @@ export class TournamentManager {
                 completed: false,
             });
         }
-        // Bye for odd participant (auto-advance highest remaining seed)
+        // Bye for odd participant (auto-advance highest remaining seed = lowest seed number)
         if (sorted.length % 2 !== 0) {
-            const byePlayer = sorted[Math.floor(sorted.length / 2)];
+            const byePlayer = sorted[sorted.length - 1];
             byePlayer.wins++;
         }
         return matches;
@@ -213,13 +213,17 @@ export class TournamentManager {
         const n = tournament.participants.length;
         const matches = [];
         // Circle method for round-robin scheduling
-        // Fix player 0, rotate others
-        const indices = Array.from({ length: n }, (_, i) => i);
-        for (let r = 0; r < roundIndex; r++) {
-            // Rotate all except first
-            const last = indices.pop();
-            indices.splice(1, 0, last);
-        }
+        // Fix player 0, rotate the rest (indices 1..n-1)
+        // For round r, apply r rotations to the non-fixed portion
+        const fixed = 0;
+        const rest = Array.from({ length: n - 1 }, (_, i) => i + 1);
+        // Rotate by roundIndex positions
+        const rotateBy = roundIndex % rest.length;
+        const rotated = [
+            ...rest.slice(rest.length - rotateBy),
+            ...rest.slice(0, rest.length - rotateBy),
+        ];
+        const indices = [fixed, ...rotated];
         for (let i = 0; i < Math.floor(n / 2); i++) {
             matches.push({
                 matchId: "",

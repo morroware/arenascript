@@ -96,6 +96,25 @@ export class LexerError extends Error {
   }
 }
 
+const SINGLE_CHAR_TOKENS = {
+  "{": TokenType.LeftBrace,
+  "}": TokenType.RightBrace,
+  "(": TokenType.LeftParen,
+  ")": TokenType.RightParen,
+  ",": TokenType.Comma,
+  ":": TokenType.Colon,
+  ".": TokenType.Dot,
+  "?": TokenType.QuestionMark,
+  "+": TokenType.Plus,
+  "-": TokenType.Minus,
+  "*": TokenType.Star,
+  "/": TokenType.Slash,
+  "%": TokenType.Percent,
+  "=": TokenType.Equal,
+  "<": TokenType.Less,
+  ">": TokenType.Greater,
+};
+
 export class Lexer {
   #source;
   #pos = 0;
@@ -178,27 +197,8 @@ export class Lexer {
       }
 
       // Single-character tokens
-      const singleChar = {
-        "{": TokenType.LeftBrace,
-        "}": TokenType.RightBrace,
-        "(": TokenType.LeftParen,
-        ")": TokenType.RightParen,
-        ",": TokenType.Comma,
-        ":": TokenType.Colon,
-        ".": TokenType.Dot,
-        "?": TokenType.QuestionMark,
-        "+": TokenType.Plus,
-        "-": TokenType.Minus,
-        "*": TokenType.Star,
-        "/": TokenType.Slash,
-        "%": TokenType.Percent,
-        "=": TokenType.Equal,
-        "<": TokenType.Less,
-        ">": TokenType.Greater,
-      };
-
-      if (singleChar[ch]) {
-        this.#addToken(singleChar[ch], ch);
+      if (SINGLE_CHAR_TOKENS[ch]) {
+        this.#addToken(SINGLE_CHAR_TOKENS[ch], ch);
         this.#advance();
         continue;
       }

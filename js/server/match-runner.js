@@ -10,6 +10,8 @@ export class MatchRunner {
     constructor(ratingStore) {
         this.ratingStore = ratingStore;
     }
+    static MAX_HISTORY = 1000;
+    static MAX_REPLAYS = 100;
     /** Execute a server-authoritative match */
     runRankedMatch(request) {
         const player1EloAtStart = this.ratingStore.getOrCreate(request.player1.playerId).elo;
@@ -46,6 +48,7 @@ export class MatchRunner {
             }
         }
         // Create match record
+        const now = Date.now();
         const record = {
             matchId,
             config: request.config,
@@ -55,13 +58,20 @@ export class MatchRunner {
             })),
             status: "completed",
             winner: result.winner,
-            startedAt: Date.now(),
-            endedAt: Date.now(),
+            startedAt: now,
+            endedAt: now,
             replayId: matchId,
             engineVersion: ENGINE_VERSION,
         };
         this.matchHistory.push(record);
+        if (this.matchHistory.length > MatchRunner.MAX_HISTORY) {
+            this.matchHistory.shift();
+        }
         this.replays.set(matchId, result.replay);
+        if (this.replays.size > MatchRunner.MAX_REPLAYS) {
+            const oldestKey = this.replays.keys().next().value;
+            this.replays.delete(oldestKey);
+        }
         return { record, result, replay: result.replay };
     }
     /** Run an unranked match (no Elo changes) */
@@ -100,19 +110,27 @@ export class MatchRunner {
         };
         const result = runMatch(setup);
         const matchId = result.replay.metadata.matchId;
+        const now = Date.now();
         const record = {
             matchId,
             config: request.config,
             participants: result.replay.metadata.participants,
             status: "completed",
             winner: result.winner,
-            startedAt: Date.now(),
-            endedAt: Date.now(),
+            startedAt: now,
+            endedAt: now,
             replayId: matchId,
             engineVersion: ENGINE_VERSION,
         };
         this.matchHistory.push(record);
+        if (this.matchHistory.length > MatchRunner.MAX_HISTORY) {
+            this.matchHistory.shift();
+        }
         this.replays.set(matchId, result.replay);
+        if (this.replays.size > MatchRunner.MAX_REPLAYS) {
+            const oldestKey = this.replays.keys().next().value;
+            this.replays.delete(oldestKey);
+        }
         return { record, result, replay: result.replay };
     }
     getMatchHistory(limit = 50) {
