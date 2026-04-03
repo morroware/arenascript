@@ -13,7 +13,11 @@ export function resolveMovement(world, robot, action) {
   }
 
   const stats = CLASS_STATS[robot.class];
-  const moveSpeed = stats?.moveSpeed ?? ROBOT_MOVE_SPEED;
+  let moveSpeed = stats?.moveSpeed ?? ROBOT_MOVE_SPEED;
+  // Apply speed pickup effect
+  if (robot.activeEffects?.some(e => e.type === "speed")) {
+    moveSpeed *= 1.5; // PICKUP_SPEED_MULTIPLIER
+  }
 
   switch (action.type) {
     case "move_to": {
@@ -37,9 +41,15 @@ export function resolveMovement(world, robot, action) {
       const target = resolveTargetPosition(world, action);
       if (!target) break;
       const navigationTarget = getNavigationTarget(world, robot, target);
-      const dir = normalize(sub(navigationTarget, robot.position));
-      robot.velocity = scale(dir, moveSpeed);
-      robot.heading = dir;
+      const diff = sub(navigationTarget, robot.position);
+      const dir = normalize(diff);
+      // If already at the target, don't update heading to zero vector
+      if (dir.x === 0 && dir.y === 0) {
+        robot.velocity = vec2(0, 0);
+      } else {
+        robot.velocity = scale(dir, moveSpeed);
+        robot.heading = dir;
+      }
       break;
     }
 
@@ -104,9 +114,15 @@ export function resolveMovement(world, robot, action) {
             nearest = e;
           }
         }
-        const dir = normalize(sub(robot.position, nearest.position));
-        robot.velocity = scale(dir, moveSpeed);
-        robot.heading = dir;
+        const diff = sub(robot.position, nearest.position);
+        const dir = normalize(diff);
+        // If coincident with enemy, pick an arbitrary retreat direction
+        if (dir.x === 0 && dir.y === 0) {
+          robot.velocity = scale({ x: 1, y: 0 }, moveSpeed);
+        } else {
+          robot.velocity = scale(dir, moveSpeed);
+          robot.heading = dir;
+        }
       } else {
         robot.velocity = vec2(0, 0);
       }
@@ -177,17 +193,22 @@ export function resolveCollisions(world) {
       const a = alive[i];
       const b = alive[j];
       const dist = distance(a.position, b.position);
-      if (dist < minDist && dist > 0.001) {
+      if (dist < minDist) {
         const overlap = (minDist - dist) / 2;
-        const dir = normalize(sub(b.position, a.position));
-        a.position = sub(a.position, scale(dir, overlap));
-        b.position = add(b.position, scale(dir, overlap));
+        // If robots are nearly coincident, push apart along an arbitrary axis
+        const dir = dist > 0.001 ? normalize(sub(b.position, a.position)) : { x: 1, y: 0 };
+        const newA = sub(a.position, scale(dir, overlap));
+        const newB = add(b.position, scale(dir, overlap));
 
         // Re-clamp to arena
-        a.position = clamp(a.position, ROBOT_RADIUS, ROBOT_RADIUS,
+        const clampedA = clamp(newA, ROBOT_RADIUS, ROBOT_RADIUS,
           world.config.arenaWidth - ROBOT_RADIUS, world.config.arenaHeight - ROBOT_RADIUS);
-        b.position = clamp(b.position, ROBOT_RADIUS, ROBOT_RADIUS,
+        const clampedB = clamp(newB, ROBOT_RADIUS, ROBOT_RADIUS,
           world.config.arenaWidth - ROBOT_RADIUS, world.config.arenaHeight - ROBOT_RADIUS);
+
+        // Only apply if new position isn't inside cover
+        if (!isInsideCover(world, clampedA)) a.position = clampedA;
+        if (!isInsideCover(world, clampedB)) b.position = clampedB;
       }
     }
   }
@@ -195,8 +216,8 @@ export function resolveCollisions(world) {
 
 function isInsideCover(world, position) {
   for (const cover of world.covers.values()) {
-    const halfW = cover.width / 2;
-    const halfH = cover.height / 2;
+    const halfW = cover.width / 2 + ROBOT_RADIUS;
+    const halfH = cover.height / 2 + ROBOT_RADIUS;
     const inX = position.x >= cover.position.x - halfW && position.x <= cover.position.x + halfW;
     const inY = position.y >= cover.position.y - halfH && position.y <= cover.position.y + halfH;
     if (inX && inY) return true;
@@ -255,24 +276,30 @@ function firstBlockingCover(world, from, to) {
 
 function chooseCoverDetour(world, from, to, cover) {
   const margin = ROBOT_RADIUS + 0.75;
-  const above = clamp(
-    vec2(cover.position.x, cover.position.y - (cover.height / 2) - margin),
-    ROBOT_RADIUS,
-    ROBOT_RADIUS,
-    world.config.arenaWidth - ROBOT_RADIUS,
-    world.config.arenaHeight - ROBOT_RADIUS,
-  );
-  const below = clamp(
-    vec2(cover.position.x, cover.position.y + (cover.height / 2) + margin),
-    ROBOT_RADIUS,
-    ROBOT_RADIUS,
-    world.config.arenaWidth - ROBOT_RADIUS,
-    world.config.arenaHeight - ROBOT_RADIUS,
-  );
+  const minX = ROBOT_RADIUS;
+  const minY = ROBOT_RADIUS;
+  const maxX = world.config.arenaWidth - ROBOT_RADIUS;
+  const maxY = world.config.arenaHeight - ROBOT_RADIUS;
 
-  const aboveCost = distance(from, above) + distance(above, to);
-  const belowCost = distance(from, below) + distance(below, to);
-  return aboveCost <= belowCost ? above : below;
+  const candidates = [
+    // Above/below
+    clamp(vec2(cover.position.x, cover.position.y - (cover.height / 2) - margin), minX, minY, maxX, maxY),
+    clamp(vec2(cover.position.x, cover.position.y + (cover.height / 2) + margin), minX, minY, maxX, maxY),
+    // Left/right
+    clamp(vec2(cover.position.x - (cover.width / 2) - margin, cover.position.y), minX, minY, maxX, maxY),
+    clamp(vec2(cover.position.x + (cover.width / 2) + margin, cover.position.y), minX, minY, maxX, maxY),
+  ];
+
+  let bestCost = Infinity;
+  let best = candidates[0];
+  for (const pt of candidates) {
+    const cost = distance(from, pt) + distance(pt, to);
+    if (cost < bestCost) {
+      bestCost = cost;
+      best = pt;
+    }
+  }
+  return best;
 }
 
 function segmentIntersectsExpandedRect(start, end, cover, padding) {

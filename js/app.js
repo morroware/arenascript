@@ -19,9 +19,9 @@ const telemetry = Telemetry.instance();
 
 const BOT_PRESETS = {
   bruiser: {
-    name: "Scout",
+    name: "Bruiser",
     class: "brawler",
-    source: `robot "Scout" version "3.0"
+    source: `robot "Bruiser" version "3.0"
 
 meta {
   author: "ArenaLab"
@@ -1214,7 +1214,16 @@ function doRunTeamSimulation() {
     participants,
   };
 
-  const result = runMatch(setup);
+  let result;
+  try {
+    telemetry.increment(Telemetry.MATCH_RUN);
+    result = runMatch(setup);
+  } catch (e) {
+    telemetry.increment(Telemetry.MATCH_ERROR);
+    logToConsole(`Match error: ${e.message}`, "error");
+    arenaStatus.textContent = "Error";
+    return;
+  }
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
   const opponentName = teamPreset.name;
@@ -1261,8 +1270,8 @@ function showMatchResults(result, opponentName) {
   }
 
   resultsContentEl.innerHTML = `
-    <div class="result-winner ${isDraw ? 'draw' : ''}">${winnerLabel}</div>
-    <div class="result-item"><span class="rl">Reason</span>${result.reason.replace(/_/g, ' ')}</div>
+    <div class="result-winner ${isDraw ? 'draw' : ''}">${escapeHtml(winnerLabel)}</div>
+    <div class="result-item"><span class="rl">Reason</span>${escapeHtml(result.reason.replace(/_/g, ' '))}</div>
     <div class="result-item"><span class="rl">Ticks</span>${result.tickCount}</div>
     <div class="result-item"><span class="rl">Team 0 HP</span>${teamTotals.get(0).hp}</div>
     <div class="result-item"><span class="rl">Team 1 HP</span>${teamTotals.get(1).hp}</div>
@@ -1283,7 +1292,7 @@ function showMatchResults(result, opponentName) {
       const teamColor = p.teamId === 0 ? 'var(--accent-cyan)' : 'var(--accent-red)';
       const label = p.playerId === "player" ? "You" : p.playerId;
       robotHtml += `<div class="result-robot-row">
-        <span class="result-robot-name" style="color:${teamColor}">${label}</span>
+        <span class="result-robot-name" style="color:${teamColor}">${escapeHtml(label)}</span>
         <span class="result-robot-stat">HP:${hp}</span>
         <span class="result-robot-stat">Dmg:${stats.damageDealt}</span>
         <span class="result-robot-stat">K:${stats.kills}</span>
@@ -1414,7 +1423,7 @@ function drawArenaBackground() {
   }
 }
 
-function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, isAlive, action) {
+function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, isAlive, action, robotClass) {
   const s = canvasScale();
   const cx = x * s;
   const cy = y * s;
@@ -1479,7 +1488,7 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
   ctx.font = `bold ${Math.max(7, 1.8 * s)}px sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(classLetter[label] || "", cx, cy);
+  ctx.fillText(classLetter[robotClass] || "", cx, cy);
   ctx.textBaseline = "alphabetic";
 
   // Health bar
@@ -1539,6 +1548,11 @@ function drawProjectile(x, y) {
 }
 
 function drawFrame(frame, labels) {
+  if (!frame || !frame.robots) {
+    drawArenaBackground();
+    return;
+  }
+
   // Update cover data from frame if available (destructible cover may change)
   if (frame.covers) {
     currentArenaLayout.covers = frame.covers.map(c => ({
@@ -1547,7 +1561,6 @@ function drawFrame(frame, labels) {
   }
 
   drawArenaBackground();
-  if (!frame || !frame.robots) return;
 
   const s = canvasScale();
 
@@ -1569,7 +1582,7 @@ function drawFrame(frame, labels) {
   // Draw pickups
   if (frame.pickups) {
     const pickupColors = {
-      energy: "#00aaff", speed: "#ffff00", damage: "#ff4444", vision: "#aa44ff",
+      energy: "rgb(0,170,255)", speed: "rgb(255,255,0)", damage: "rgb(255,68,68)", vision: "rgb(170,68,255)",
     };
     const pickupLabels = {
       energy: "E", speed: "S", damage: "D", vision: "V",
@@ -1607,7 +1620,7 @@ function drawFrame(frame, labels) {
     const maxHP = classStats?.health || 100;
     const maxEnergy = classStats?.energy || 100;
     const isAlive = r.health > 0;
-    drawRobot(r.position.x, r.position.y, r.health, maxHP, r.energy, maxEnergy, r.teamId, labels[r.id] || r.id, isAlive, r.action);
+    drawRobot(r.position.x, r.position.y, r.health, maxHP, r.energy, maxEnergy, r.teamId, labels[r.id] || r.id, isAlive, r.action, r.robotClass);
   }
 
   // Draw event indicators (damage flashes, grenade explosions, etc.)
@@ -2127,7 +2140,7 @@ function toggleFullPageBattle() {
   fullPageBattle = !fullPageBattle;
   document.body.classList.toggle("fullpage-battle", fullPageBattle);
   btnToggleFullpage?.classList.toggle("active", fullPageBattle);
-  btnToggleFullpage.textContent = fullPageBattle ? "Collapse" : "Expand";
+  if (btnToggleFullpage) btnToggleFullpage.textContent = fullPageBattle ? "Collapse" : "Expand";
 
   // Resize canvas for full-page mode
   if (fullPageBattle) {

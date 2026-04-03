@@ -41,16 +41,11 @@ export class VisibilityTracker {
       }
 
       // enemy_lost: was visible, no longer
+      // Note: lastSeenEnemy was already updated during the 'enemy_seen' phase above
+      // or from sensor calls; we don't update it here because the enemy's current
+      // position is hidden (they left visibility). The last known position is already stored.
       for (const enemyId of previousSet) {
         if (!currentlyVisible.has(enemyId)) {
-          const enemy = world.getRobot(enemyId);
-          if (enemy) {
-            robot.memory.lastSeenEnemy = {
-              id: enemy.id,
-              position: { x: enemy.position.x, y: enemy.position.y },
-              tick: world.currentTick,
-            };
-          }
           world.emitEvent({
             type: "enemy_lost",
             tick: world.currentTick,

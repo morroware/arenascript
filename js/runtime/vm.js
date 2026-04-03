@@ -28,7 +28,9 @@ export class VM {
 
     // Initialize state slots with default values
     this.stateSlots = program.stateSlots.map(s => s.initialValue);
-    this.locals = new Array(256).fill(null);
+    // Size locals array to fit max call depth * local window size
+    const localsSize = Math.max(256, (program.localWindowSize || 1) * VM.MAX_CALL_DEPTH);
+    this.locals = new Array(localsSize).fill(null);
     this.localBase = 0;
   }
 
@@ -49,10 +51,15 @@ export class VM {
     this.iterStack = [];
     this.localBase = 0;
 
-    // Push event data onto the stack for handlers that declare a parameter
-    // The compiled handler will pop it into a local slot via STORE_LOCAL
+    // Push event data onto the stack for handlers that declare a parameter.
+    // The compiled handler will pop it into a local slot via STORE_LOCAL.
+    // Only push if the handler's first instruction is STORE_LOCAL (indicating a declared param),
+    // otherwise the extra value corrupts the stack.
     if (event) {
-      this.stack.push(this.eventToVMObject(event));
+      const firstOp = this.bytecode[offset];
+      if (firstOp === Op.STORE_LOCAL) {
+        this.stack.push(this.eventToVMObject(event));
+      }
     }
 
     return this.run();
@@ -115,6 +122,9 @@ export class VM {
 
           case Op.LOAD_STATE: {
             const idx = this.readU16();
+            if (idx >= this.stateSlots.length) {
+              throw new Error(`State slot ${idx} out of bounds (max ${this.stateSlots.length - 1})`);
+            }
             this.budget.memoryOp();
             this.push(this.stateSlots[idx]);
             break;
@@ -122,6 +132,9 @@ export class VM {
 
           case Op.STORE_STATE: {
             const idx = this.readU16();
+            if (idx >= this.stateSlots.length) {
+              throw new Error(`State slot ${idx} out of bounds (max ${this.stateSlots.length - 1})`);
+            }
             this.budget.memoryOp();
             this.stateSlots[idx] = this.pop();
             break;
@@ -344,7 +357,10 @@ export class VM {
   }
 
   pop() {
-    return this.stack.pop() ?? null;
+    if (this.stack.length === 0) {
+      throw new Error("Stack underflow: attempted to pop from empty stack");
+    }
+    return this.stack.pop();
   }
 
   peek() {

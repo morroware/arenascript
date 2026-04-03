@@ -33,6 +33,8 @@ export function createSensorGateway(world) {
       if (!other.alive) continue;
       if (other.teamId === robot.teamId) continue;
       if (distance(robot.position, other.position) > range) continue;
+      // Scan still requires line of sight (no wallhack)
+      if (!hasLineOfSight(world, robot.position, other.position)) continue;
       detected.push(other);
     }
     detected.sort((a, b) => distance(robot.position, a.position) - distance(robot.position, b.position));

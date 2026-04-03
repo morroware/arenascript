@@ -3,11 +3,22 @@
 // ============================================================================
 
 import { distance, sub, normalize, scale, add } from "../shared/vec2.js";
-import { CLASS_STATS, DEFAULT_VISION_RANGE, LOS_RANGE } from "../shared/config.js";
+import {
+  CLASS_STATS, DEFAULT_VISION_RANGE, LOS_RANGE,
+  OVERWATCH_VISION_BONUS, PICKUP_VISION_BONUS,
+} from "../shared/config.js";
 
 function visionRangeFor(robot) {
-  const byClass = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
-  return Math.min(byClass, LOS_RANGE);
+  let range = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
+  // Apply vision pickup effect
+  if (robot.activeEffects?.some(e => e.type === "vision")) {
+    range += PICKUP_VISION_BONUS;
+  }
+  // Apply overwatch vision bonus
+  if (robot.overwatchActive) {
+    range += OVERWATCH_VISION_BONUS;
+  }
+  return Math.min(range, LOS_RANGE);
 }
 
 /** Check if a point is within a rectangular cover object */

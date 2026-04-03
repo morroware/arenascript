@@ -86,6 +86,7 @@ const CLASS_STATS = [
         'attackDamage'   => 14,
         'attackRange'    => 3.5,
         'attackCooldown' => 4,
+        'visionRange'    => 28.0,
     ],
     'ranger' => [
         'health'         => 80,
@@ -94,6 +95,7 @@ const CLASS_STATS = [
         'attackDamage'   => 10,
         'attackRange'    => 8.0,
         'attackCooldown' => 6,
+        'visionRange'    => 40.0,
     ],
     'tank' => [
         'health'         => 150,
@@ -102,6 +104,7 @@ const CLASS_STATS = [
         'attackDamage'   => 8,
         'attackRange'    => 4.0,
         'attackCooldown' => 5,
+        'visionRange'    => 24.0,
     ],
     'support' => [
         'health'         => 90,
@@ -110,5 +113,6 @@ const CLASS_STATS = [
         'attackDamage'   => 6,
         'attackRange'    => 6.0,
         'attackCooldown' => 7,
+        'visionRange'    => 32.0,
     ],
 ];

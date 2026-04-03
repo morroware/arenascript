@@ -226,6 +226,8 @@ class TournamentManager
             } else {
                 // Draw — in single elimination, give it to higher seed
                 $match['winner'] = $match['participant1Index'];
+                $tournament['participants'][$match['participant1Index']]['wins']++;
+                $tournament['participants'][$match['participant2Index']]['losses']++;
                 if ($tournament['format'] === 'single_elimination') {
                     $tournament['participants'][$match['participant2Index']]['eliminated'] = true;
                 }
@@ -314,6 +316,11 @@ class TournamentManager
                 'participant2Index' => $p2['seed'] - 1,
                 'completed'         => false,
             ];
+        }
+        // Bye for odd participant (auto-advance middle seed)
+        if ($count % 2 !== 0) {
+            $byePlayer = &$active[intdiv($count, 2)];
+            $byePlayer['wins']++;
         }
         return $matches;
     }
