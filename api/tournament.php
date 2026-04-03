@@ -123,7 +123,7 @@ class TournamentManager
         }
 
         $matches = match ($tournament['format']) {
-            'single_elimination' => $this->generateSingleEliminationPairings($active, $rng),
+            'single_elimination' => $this->generateSingleEliminationPairings($tournamentId, $active, $rng),
             'round_robin'        => $this->generateRoundRobinPairings($tournament, $this->tournaments[$tournamentId]['currentRound']),
             'swiss'              => $this->generateSwissPairings($active, $rng),
             default              => null,
@@ -301,7 +301,7 @@ class TournamentManager
     // Pairing generators
     // -------------------------------------------------------------------------
 
-    private function generateSingleEliminationPairings(array $active, SeededRNG $rng): array
+    private function generateSingleEliminationPairings(string $tournamentId, array $active, SeededRNG $rng): array
     {
         $matches = [];
         // Pair by seed: 1v(n), 2v(n-1), etc.
@@ -319,8 +319,11 @@ class TournamentManager
         }
         // Bye for odd participant (auto-advance middle seed)
         if ($count % 2 !== 0) {
-            $byePlayer = &$active[intdiv($count, 2)];
-            $byePlayer['wins']++;
+            $byePlayer = $active[intdiv($count, 2)];
+            $participantIndex = $byePlayer['seed'] - 1;
+            if (isset($this->tournaments[$tournamentId]['tournament']['participants'][$participantIndex])) {
+                $this->tournaments[$tournamentId]['tournament']['participants'][$participantIndex]['wins']++;
+            }
         }
         return $matches;
     }

@@ -30,6 +30,8 @@ import {
 } from "../shared/config.js";
 import { distance, vec2 } from "../shared/vec2.js";
 
+let nextMatchSequence = 0;
+
 /**
  * Run a complete match simulation.
  * This is the core game loop — fully deterministic.
@@ -98,7 +100,7 @@ export function runMatch(setup) {
   }
 
   // Create replay writer and capture the procedural arena layout
-  const matchId = `match_${config.seed}_${Date.now()}`;
+  const matchId = `match_${config.seed}_${++nextMatchSequence}`;
   const replayWriter = new ReplayWriter(matchId, config.seed, matchParticipants);
   replayWriter.captureArenaLayout(world);
 

@@ -1022,6 +1022,47 @@ function testDeterministicReplayWithSeed() {
   }
 }
 
+function testProgramIdIsUniqueWhenTimeIsFrozen() {
+  const fixedNow = 1700000000000;
+  const originalNow = Date.now;
+  Date.now = () => fixedNow;
+  try {
+    const compiledA = compile(`robot "ProgA" version "1.0"\non tick { stop }`);
+    const compiledB = compile(`robot "ProgB" version "1.0"\non tick { stop }`);
+    assert.ok(compiledA.success && compiledB.success, "Both programs should compile");
+    assert.notEqual(compiledA.program.programId, compiledB.program.programId,
+      "Program IDs should remain unique even when Date.now() is constant");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+function testMatchIdIsUniqueWhenTimeIsFrozen() {
+  const bot = compile(`robot "FrozenTimeBot" version "1.0"
+on tick {
+  move_forward
+}`);
+  assert.ok(bot.success);
+
+  const config = { mode: "1v1_ranked", arenaWidth: 80, arenaHeight: 80, maxTicks: 50, tickRate: 30, seed: 777 };
+  const participants = [
+    { program: bot.program, constants: bot.constants, playerId: "p1", teamId: 0 },
+    { program: bot.program, constants: bot.constants, playerId: "p2", teamId: 1 },
+  ];
+
+  const fixedNow = 1700000000000;
+  const originalNow = Date.now;
+  Date.now = () => fixedNow;
+  try {
+    const resultA = runMatch({ config, participants });
+    const resultB = runMatch({ config, participants });
+    assert.notEqual(resultA.replay.metadata.matchId, resultB.replay.metadata.matchId,
+      "Match IDs should remain unique even when Date.now() is constant");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -1084,6 +1125,8 @@ function run() {
     testEndToEnd2v2Match,
     testEndToEndFFAMatch,
     testDeterministicReplayWithSeed,
+    testProgramIdIsUniqueWhenTimeIsFrozen,
+    testMatchIdIsUniqueWhenTimeIsFrozen,
   ];
 
   let passed = 0;
