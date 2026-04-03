@@ -329,13 +329,22 @@ export class Parser {
     this.#expect(TokenType.Return);
     let value;
     if (!this.#check(TokenType.RightBrace) && !this.#isAtEnd()) {
-      // Only parse value if next token looks like an expression start
+      // Only parse value if next token looks like an expression start,
+      // not a statement-starting keyword
       const next = this.#current();
       if (
         next.type !== TokenType.RightBrace &&
         next.type !== TokenType.On &&
         next.type !== TokenType.Fn &&
-        next.type !== TokenType.EOF
+        next.type !== TokenType.Let &&
+        next.type !== TokenType.Set &&
+        next.type !== TokenType.If &&
+        next.type !== TokenType.For &&
+        next.type !== TokenType.After &&
+        next.type !== TokenType.Every &&
+        next.type !== TokenType.Return &&
+        next.type !== TokenType.EOF &&
+        !(next.type === TokenType.Identifier && ACTION_KEYWORDS.has(next.value))
       ) {
         value = this.#parseExpression();
       }
@@ -359,6 +368,8 @@ export class Parser {
       !this.#check(TokenType.Return) &&
       !this.#check(TokenType.On) &&
       !this.#check(TokenType.Fn) &&
+      !this.#check(TokenType.After) &&
+      !this.#check(TokenType.Every) &&
       !(this.#current().type === TokenType.Identifier && ACTION_KEYWORDS.has(this.#current().value))
     ) {
       args.push(this.#parseExpression());
