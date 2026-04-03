@@ -5,6 +5,8 @@
 import { Op } from "../runtime/opcodes.js";
 import { LANGUAGE_VERSION } from "../shared/config.js";
 
+let nextProgramSequence = 0;
+
 export class CompileError extends Error {
   constructor(message, line, column) {
     super(`Compile error at ${line}:${column}: ${message}`);
@@ -200,7 +202,7 @@ export class Compiler {
 
     return {
       program: {
-        programId: `prog_${Date.now()}`,
+        programId: `prog_${++nextProgramSequence}`,
         sourceHash: "",
         languageVersion: LANGUAGE_VERSION,
         robotName: program.robot.name,
