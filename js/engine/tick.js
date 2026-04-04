@@ -34,6 +34,7 @@ import {
   HEAT_MAX,
 } from "../shared/config.js";
 import { distance, vec2 } from "../shared/vec2.js";
+import { validateMatchRequest } from "../shared/validation.js";
 
 let nextMatchSequence = 0;
 
@@ -42,6 +43,14 @@ let nextMatchSequence = 0;
  * This is the core game loop — fully deterministic.
  */
 export function runMatch(setup) {
+  // Fail fast on malformed setups. Previously runMatch would either throw
+  // deep inside world/VM setup or silently produce an undefined result
+  // if, e.g., config.seed was NaN or a participant had no bytecode.
+  const validation = validateMatchRequest(setup);
+  if (!validation.valid) {
+    throw new Error(`Invalid match setup: ${validation.errors.join("; ")}`);
+  }
+
   resetIdCounter();
 
   const { config } = setup;

@@ -215,6 +215,11 @@ export function exportBot(id) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Upper bound on a single uploaded file. Matches the 200KB source cap
+// enforced by validate() but checked *before* we ever read bytes into
+// memory so that a malicious/misclicked 100MB file can't OOM the tab.
+const MAX_IMPORT_FILE_BYTES = 200_000;
+
 /** Read a File object and return its text contents. */
 export function readFileAsText(file) {
   return new Promise((resolve, reject) => {
@@ -234,6 +239,17 @@ export async function importFiles(fileList) {
   const results = [];
   for (const file of files) {
     try {
+      if (typeof file.size === "number" && file.size > MAX_IMPORT_FILE_BYTES) {
+        results.push({
+          file: file.name,
+          ok: false,
+          errors: [
+            `File is ${file.size} bytes, exceeds ${MAX_IMPORT_FILE_BYTES} byte limit.`,
+          ],
+          warnings: [],
+        });
+        continue;
+      }
       const source = await readFileAsText(file);
       const r = addBot(source);
       results.push({ file: file.name, ...r });

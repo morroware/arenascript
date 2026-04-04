@@ -130,20 +130,8 @@ export class Compiler {
     this.#reset();
     const builder = new ChunkBuilder();
 
-    // Register state slots
-    if (program.state) {
-      for (const entry of program.state.entries) {
-        const idx = this.#stateSlots.length;
-        this.#stateSlots.push({
-          name: entry.name,
-          type: entry.type.name + (entry.type.nullable ? "?" : ""),
-          initialValue: this.#evaluateConstantExpr(entry.initialValue),
-        });
-        this.#stateIndexMap.set(entry.name, idx);
-      }
-    }
-
-    // Register constants in the constant pool
+    // Register constants in the constant pool FIRST so that state slot
+    // initializers can reference them.
     if (program.constants) {
       for (const entry of program.constants.entries) {
         const val = this.#evaluateConstantExpr(entry.value);
@@ -159,6 +147,19 @@ export class Compiler {
           constIdx = builder.addConstant({ type: "null" });
         }
         this.#constMap.set(entry.name, constIdx);
+      }
+    }
+
+    // Register state slots (may reference already-registered constants).
+    if (program.state) {
+      for (const entry of program.state.entries) {
+        const idx = this.#stateSlots.length;
+        this.#stateSlots.push({
+          name: entry.name,
+          type: entry.type.name + (entry.type.nullable ? "?" : ""),
+          initialValue: this.#evaluateConstantExpr(entry.initialValue),
+        });
+        this.#stateIndexMap.set(entry.name, idx);
       }
     }
 
@@ -206,8 +207,20 @@ export class Compiler {
     }
 
     const chunk = builder.toChunk();
+
+    // Guard against bytecode exceeding the 16-bit offset space used by
+    // jump/call instructions. Downstream validation (validateParticipant)
+    // also enforces this, but we catch it earlier with a clearer error.
+    if (chunk.code.length > 65535) {
+      throw new Error(
+        `Compiled bytecode is ${chunk.code.length} bytes, exceeds maximum of 65535. Split your program into smaller functions.`
+      );
+    }
+
     const squadSizeRaw = program.squad?.size !== undefined ? Number(program.squad.size) : 1;
-    const squadSize = Number.isInteger(squadSizeRaw) ? squadSizeRaw : 1;
+    let squadSize = Number.isInteger(squadSizeRaw) ? squadSizeRaw : 1;
+    if (squadSize < 1) squadSize = 1;
+    if (squadSize > 5) squadSize = 5;
     const squadRoles = Array.isArray(program.squad?.roles) ? program.squad.roles : [];
 
     return {

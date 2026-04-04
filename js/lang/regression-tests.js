@@ -77,6 +77,25 @@ on tick {}`;
   assert.ok(values.includes(12), "PRODUCT should be 12");
 }
 
+function testStateInitializerReferencesConstant() {
+  // Regression: previously the compiler processed state slots BEFORE
+  // registering constants, so a state initializer that referenced a
+  // constant silently evaluated to null.
+  const source = `robot "StateConst" version "1.0"
+const {
+  START_HP = 42
+}
+state {
+  hp: number = START_HP
+}
+on tick {}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+  const hpSlot = result.program.stateSlots.find(s => s.name === "hp");
+  assert.ok(hpSlot, "hp state slot should exist");
+  assert.equal(hpSlot.initialValue, 42, "state initializer should resolve referenced constant");
+}
+
 function testConstantNegativeValue() {
   const source = `robot "NegTest" version "1.0"
 const {
@@ -1071,6 +1090,7 @@ function run() {
     testSemanticAnalyzerStateIsolation,
     testCompilerStateIsolation,
     testConstantExpressionEvaluation,
+    testStateInitializerReferencesConstant,
     testConstantNegativeValue,
     testFunctionNameAsIdentifier,
     testRecursionLocalsIsolation,
