@@ -17,11 +17,18 @@ export function calculateEloChange(winnerRating, loserRating) {
     const kWinner = getKFactor(winnerRating);
     const kLoser = getKFactor(loserRating);
     const k = (kWinner + kLoser) / 2;
-    const winnerDelta = Math.round(k * (1 - expectedWin));
-    const loserDelta = -winnerDelta; // Ensure zero-sum
+    let winnerDelta = Math.round(k * (1 - expectedWin));
+    // Enforce a rating floor of 0 without breaking zero-sum: if the loser
+    // would drop below zero, cap the transfer at whatever they actually have.
+    // Previously the loser was clamped but the winner still received the full
+    // delta, which quietly inflated total Elo on the ladder over time.
+    if (loserRating - winnerDelta < 0) {
+        winnerDelta = loserRating;
+    }
+    const loserDelta = -winnerDelta;
     return {
         winnerNew: winnerRating + winnerDelta,
-        loserNew: Math.max(0, loserRating + loserDelta),
+        loserNew: loserRating + loserDelta,
         winnerDelta,
         loserDelta,
     };

@@ -32,11 +32,17 @@ function calculateEloChange(float $winnerRating, float $loserRating): array
     $k = ($kWinner + $kLoser) / 2;
 
     $winnerDelta = (int) round($k * (1 - $expectedWin));
-    $loserDelta  = -$winnerDelta; // Ensure zero-sum
+    // Enforce the rating floor of 0 without breaking zero-sum. Previously
+    // the loser was clamped via max(0, ...) while the winner still received
+    // the full delta, inflating total Elo on the ladder over time.
+    if ($loserRating - $winnerDelta < 0) {
+        $winnerDelta = (int) $loserRating;
+    }
+    $loserDelta = -$winnerDelta;
 
     return [
         'winnerNew'   => (int) ($winnerRating + $winnerDelta),
-        'loserNew'    => (int) max(0, $loserRating + $loserDelta),
+        'loserNew'    => (int) ($loserRating + $loserDelta),
         'winnerDelta' => $winnerDelta,
         'loserDelta'  => $loserDelta,
     ];

@@ -14,7 +14,6 @@ class LobbyManager
 
     private MatchRunner $matchRunner;
     private MatchmakingQueue $matchmaking;
-    private int $nextId = 0;
 
     public function __construct(MatchRunner $matchRunner, MatchmakingQueue $matchmaking)
     {
@@ -39,7 +38,12 @@ class LobbyManager
             $name = 'Untitled Lobby';
         }
 
-        $id = 'lobby_' . (++$this->nextId);
+        // Use 128 bits of cryptographic randomness so lobby IDs can't be
+        // guessed to hijack a session mid-match. Retry on collision (which
+        // is astronomically unlikely but still handled).
+        do {
+            $id = 'lobby_' . bin2hex(random_bytes(16));
+        } while (isset($this->lobbies[$id]));
 
         $maxPlayers = match ($mode) {
             '2v2'   => 4,

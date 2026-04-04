@@ -192,14 +192,25 @@ export function validateReplayDeterminism(replay1, replay2) {
     if (f1.tick !== f2.tick) return false;
     if (f1.robots.length !== f2.robots.length) return false;
 
-    for (let j = 0; j < f1.robots.length; j++) {
-      const r1 = f1.robots[j];
-      const r2 = f2.robots[j];
+    // Sort robots by id so we compare apples-to-apples even if something
+    // upstream changes iteration order. This makes the validator robust to
+    // harmless reorderings that don't actually represent a divergence, while
+    // still catching real state drift.
+    const r1s = [...f1.robots].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const r2s = [...f2.robots].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+    for (let j = 0; j < r1s.length; j++) {
+      const r1 = r1s[j];
+      const r2 = r2s[j];
       if (r1.id !== r2.id) return false;
       if (Math.abs(r1.position.x - r2.position.x) > 0.001) return false;
       if (Math.abs(r1.position.y - r2.position.y) > 0.001) return false;
       if (r1.health !== r2.health) return false;
       if (r1.energy !== r2.energy) return false;
+      if (r1.heat !== r2.heat) return false;
+      if (r1.ammo !== r2.ammo) return false;
+      if (!!r1.cloaked !== !!r2.cloaked) return false;
+      if (!!r1.alive !== !!r2.alive) return false;
     }
   }
 

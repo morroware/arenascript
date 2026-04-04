@@ -695,7 +695,13 @@ const tbAllySlots = document.getElementById("tb-ally-slots");
 const tbEnemySlots = document.getElementById("tb-enemy-slots");
 const tbMatchInfo = document.getElementById("tb-match-info");
 
+if (!canvasEl) {
+  throw new Error("Missing required #arena-canvas element in HTML");
+}
 const ctx = canvasEl.getContext("2d");
+if (!ctx) {
+  throw new Error("Failed to acquire 2D canvas context — arena rendering unavailable");
+}
 
 // ============================================================================
 // State
@@ -2163,11 +2169,22 @@ function tbOpenModal() {
   tbAddBot("enemy", "fortress");
 
   tbUpdateInfo();
+  // Remember which element opened the modal so we can restore focus on close,
+  // which is important for keyboard-only users.
+  tbLastFocusedElement = document.activeElement;
   teamBuilderModal.hidden = false;
+  // Move focus into the modal so screen readers announce it.
+  (btnTbRun || btnCloseTeamBuilder)?.focus?.();
 }
+
+let tbLastFocusedElement = null;
 
 function tbCloseModal() {
   if (teamBuilderModal) teamBuilderModal.hidden = true;
+  if (tbLastFocusedElement && typeof tbLastFocusedElement.focus === "function") {
+    tbLastFocusedElement.focus();
+  }
+  tbLastFocusedElement = null;
 }
 
 function tbRunBattle() {
@@ -2292,6 +2309,14 @@ for (const btn of document.querySelectorAll(".tb-add-btn")) {
 // Close modal on overlay click
 teamBuilderModal?.addEventListener("click", (e) => {
   if (e.target === teamBuilderModal) tbCloseModal();
+});
+
+// Close modal on Escape key — beta testers have complained about being
+// trapped in the modal without a mouse.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && teamBuilderModal && !teamBuilderModal.hidden) {
+    tbCloseModal();
+  }
 });
 
 // Wire Arena toggles

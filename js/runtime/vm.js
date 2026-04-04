@@ -53,13 +53,11 @@ export class VM {
 
     // Push event data onto the stack for handlers that declare a parameter.
     // The compiled handler will pop it into a local slot via STORE_LOCAL.
-    // Only push if the handler's first instruction is STORE_LOCAL (indicating a declared param),
-    // otherwise the extra value corrupts the stack.
-    if (event) {
-      const firstOp = this.bytecode[offset];
-      if (firstOp === Op.STORE_LOCAL) {
-        this.stack.push(this.eventToVMObject(event));
-      }
+    // We rely on an explicit set populated by the compiler rather than
+    // inspecting bytecode, which is brittle and can misfire if the first
+    // statement in a paramless handler happens to compile to STORE_LOCAL.
+    if (event && this.program.eventHandlerHasParam && this.program.eventHandlerHasParam.has(eventType)) {
+      this.stack.push(this.eventToVMObject(event));
     }
 
     return this.run();
@@ -380,7 +378,11 @@ export class VM {
 
   popNum() {
     const v = this.pop();
-    return typeof v === "number" ? v : 0;
+    // Coerce non-numeric or NaN values to 0 so arithmetic can't poison the
+    // stack with NaN, which would then propagate into world state and
+    // ultimately break determinism / invariants.
+    if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+    return v;
   }
 
   popBool() {

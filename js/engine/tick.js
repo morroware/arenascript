@@ -704,6 +704,9 @@ function resolveUtilityAction(world, robot, action, robotStats) {
 /** Detonate any armed self-destructs whose countdown has elapsed. */
 function resolveSelfDestructs(world, tick) {
   for (const robot of world.getAliveRobots()) {
+    // Robot may have been killed earlier in this same phase by another
+    // detonation; skip stale entries so we don't detonate corpses.
+    if (!robot.alive || robot.health <= 0) continue;
     if (!robot.selfDestructTick || robot.selfDestructTick > tick) continue;
     // Detonate: AoE damage to all robots (friendly fire included — sacrifice play)
     const center = robot.position;
