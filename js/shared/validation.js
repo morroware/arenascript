@@ -19,7 +19,7 @@ const MODE_PLAYER_COUNTS = {
   "1v1_unranked": { min: 2, max: 2 },
   "duel_1v1": { min: 2, max: 2 },
   "2v2": { min: 2, max: 4 },
-  "squad_2v2": { min: 2, max: 4 },
+  "squad_2v2": { min: 2, max: 8 },
   "ffa": { min: 2, max: 8 },
   "2v1_unranked": { min: 2, max: 3 },
   "tournament": { min: 2, max: 2 },
