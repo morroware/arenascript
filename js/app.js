@@ -685,10 +685,14 @@ const btnBookmarkDamage = document.getElementById("btn-bookmark-damage");
 const btnBookmarkKill = document.getElementById("btn-bookmark-kill");
 const btnToggleTraces = document.getElementById("btn-toggle-traces");
 const btnToggleFullpage = document.getElementById("btn-toggle-fullpage");
-const btnAddSlot = document.getElementById("btn-add-slot");
-const btnRemoveSlot = document.getElementById("btn-remove-slot");
-const btnRunTeamBuilder = document.getElementById("btn-run-team-builder");
-const teamBuilderSlots = document.getElementById("team-builder-slots");
+const btnOpenTeamBuilder = document.getElementById("btn-open-team-builder");
+const teamBuilderModal = document.getElementById("team-builder-modal");
+const btnCloseTeamBuilder = document.getElementById("btn-close-team-builder");
+const btnTbCancel = document.getElementById("btn-tb-cancel");
+const btnTbRun = document.getElementById("btn-tb-run");
+const tbAllySlots = document.getElementById("tb-ally-slots");
+const tbEnemySlots = document.getElementById("tb-enemy-slots");
+const tbMatchInfo = document.getElementById("tb-match-info");
 
 const ctx = canvasEl.getContext("2d");
 
@@ -2022,95 +2026,159 @@ document.addEventListener("keydown", (e) => {
 });
 
 // ============================================================================
-// Team Builder
+// Team Builder (Modal)
 // ============================================================================
 
-const MAX_TEAM_SLOTS = 5;
+const MAX_TEAM_SLOTS = 4;
 
-function createSlotHTML(slotIndex) {
-  const div = document.createElement("div");
-  div.className = "team-slot";
-  div.dataset.slot = slotIndex;
-  div.innerHTML = `
-    <select class="team-slot-role" data-slot="${slotIndex}">
-      <option value="">Role...</option>
-      <option value="frontline">Frontline</option>
-      <option value="flanker">Flanker</option>
-      <option value="support">Support</option>
-      <option value="scout">Scout</option>
-    </select>
-    <select class="team-slot-script" data-slot="${slotIndex}">
-      <option value="bruiser">Bruiser</option>
-      <option value="kiter">Kiter</option>
-      <option value="fortress">Fortress</option>
-      <option value="healer">Healer</option>
-      <option value="flanker">Flanker</option>
-      <option value="sentinel">Sentinel</option>
-    </select>`;
-  return div;
+const BOT_ICONS = {
+  bruiser: "B", kiter: "K", fortress: "F",
+  healer: "H", flanker: "L", sentinel: "S",
+};
+
+function tbGetBotClass(key) {
+  return BOT_PRESETS[key]?.class ?? "brawler";
 }
 
-function addTeamSlot() {
-  if (!teamBuilderSlots) return;
-  const currentSlots = teamBuilderSlots.querySelectorAll(".team-slot").length;
-  if (currentSlots >= MAX_TEAM_SLOTS) {
-    logToConsole("Max 5 team slots.", "warn");
-    return;
-  }
-  teamBuilderSlots.appendChild(createSlotHTML(currentSlots));
+function tbCreateBotCard(team, botKey) {
+  const preset = BOT_PRESETS[botKey];
+  const cls = preset?.class ?? "brawler";
+  const card = document.createElement("div");
+  card.className = "tb-bot-card";
+  card.dataset.team = team;
+
+  const options = Object.entries(BOT_PRESETS)
+    .map(([k, p]) => `<option value="${k}"${k === botKey ? " selected" : ""}>${p.name}</option>`)
+    .join("");
+
+  card.innerHTML = `
+    <div class="tb-card-icon ${cls}">${BOT_ICONS[botKey] ?? "?"}</div>
+    <div class="tb-card-body">
+      <select class="tb-card-select">${options}</select>
+      <span class="tb-card-class">${cls}</span>
+    </div>
+    <button class="tb-remove-btn" title="Remove">&times;</button>`;
+
+  const select = card.querySelector(".tb-card-select");
+  const icon = card.querySelector(".tb-card-icon");
+  const classLabel = card.querySelector(".tb-card-class");
+
+  select.addEventListener("change", () => {
+    const newCls = tbGetBotClass(select.value);
+    icon.className = `tb-card-icon ${newCls}`;
+    icon.textContent = BOT_ICONS[select.value] ?? "?";
+    classLabel.textContent = newCls;
+  });
+
+  card.querySelector(".tb-remove-btn").addEventListener("click", () => {
+    card.remove();
+    tbUpdateInfo();
+    tbUpdateEmptyStates();
+  });
+
+  return card;
 }
 
-function removeTeamSlot() {
-  if (!teamBuilderSlots) return;
-  const slots = teamBuilderSlots.querySelectorAll(".team-slot");
-  if (slots.length <= 1) return;
-  slots[slots.length - 1].remove();
-}
-
-function doRunTeamBuilder() {
-  if (!teamBuilderSlots) return;
-
-  const scriptSelects = teamBuilderSlots.querySelectorAll(".team-slot-script");
-  const allies = [];
-  for (const sel of scriptSelects) {
-    const key = sel.value;
-    const preset = BOT_PRESETS[key];
-    if (!preset) { logToConsole(`Unknown bot: ${key}`, "error"); return; }
-    try {
-      const compiled = compile(preset.source);
-      if (!compiled.success) { logToConsole(`${preset.name} compile fail: ${compiled.errors.join(", ")}`, "error"); return; }
-      allies.push({ preset, compiled });
-    } catch (e) {
-      logToConsole(`${preset.name} error: ${e.message}`, "error");
-      return;
+function tbUpdateEmptyStates() {
+  for (const container of [tbAllySlots, tbEnemySlots]) {
+    if (!container) continue;
+    const existing = container.querySelector(".tb-empty");
+    if (container.querySelectorAll(".tb-bot-card").length === 0) {
+      if (!existing) {
+        const empty = document.createElement("div");
+        empty.className = "tb-empty";
+        empty.textContent = "No bots added yet";
+        container.appendChild(empty);
+      }
+    } else if (existing) {
+      existing.remove();
     }
   }
+}
 
-  if (allies.length < 1) { logToConsole("Add at least one team member.", "warn"); return; }
+function tbUpdateInfo() {
+  const allyCount = tbAllySlots?.querySelectorAll(".tb-bot-card").length ?? 0;
+  const enemyCount = tbEnemySlots?.querySelectorAll(".tb-bot-card").length ?? 0;
+  if (tbMatchInfo) tbMatchInfo.textContent = `${allyCount} vs ${enemyCount}`;
+  if (btnTbRun) btnTbRun.disabled = allyCount < 1 || enemyCount < 1;
+}
 
-  // Auto-select opponents: mirror team size with random presets
-  const oppKeys = ["kiter", "fortress", "bruiser", "healer", "sentinel"];
-  const opponents = [];
-  for (let i = 0; i < allies.length; i++) {
-    const key = oppKeys[i % oppKeys.length];
-    const preset = BOT_PRESETS[key];
-    const compiled = compile(preset.source);
-    if (!compiled.success) continue;
-    opponents.push({ preset, compiled });
+function tbAddBot(team, botKey) {
+  const container = team === "ally" ? tbAllySlots : tbEnemySlots;
+  if (!container) return;
+  const count = container.querySelectorAll(".tb-bot-card").length;
+  if (count >= MAX_TEAM_SLOTS) {
+    logToConsole(`Max ${MAX_TEAM_SLOTS} bots per team.`, "warn");
+    return;
+  }
+  const empty = container.querySelector(".tb-empty");
+  if (empty) empty.remove();
+  container.appendChild(tbCreateBotCard(team, botKey));
+  tbUpdateInfo();
+}
+
+function tbOpenModal() {
+  if (!teamBuilderModal) return;
+
+  // Reset with defaults
+  if (tbAllySlots) tbAllySlots.innerHTML = "";
+  if (tbEnemySlots) tbEnemySlots.innerHTML = "";
+
+  tbAddBot("ally", "bruiser");
+  tbAddBot("ally", "healer");
+  tbAddBot("enemy", "kiter");
+  tbAddBot("enemy", "fortress");
+
+  tbUpdateInfo();
+  teamBuilderModal.hidden = false;
+}
+
+function tbCloseModal() {
+  if (teamBuilderModal) teamBuilderModal.hidden = true;
+}
+
+function tbRunBattle() {
+  if (!tbAllySlots || !tbEnemySlots) return;
+
+  const collectTeam = (container, teamId, prefix) => {
+    const cards = container.querySelectorAll(".tb-bot-card");
+    const team = [];
+    for (let i = 0; i < cards.length; i++) {
+      const key = cards[i].querySelector(".tb-card-select")?.value;
+      const preset = BOT_PRESETS[key];
+      if (!preset) { logToConsole(`Unknown bot: ${key}`, "error"); return null; }
+      try {
+        const compiled = compile(preset.source);
+        if (!compiled.success) {
+          logToConsole(`${preset.name} compile fail: ${compiled.errors.join(", ")}`, "error");
+          return null;
+        }
+        team.push({
+          program: compiled.program, constants: compiled.constants,
+          playerId: `${prefix}_${preset.name.toLowerCase()}_${i}`, teamId,
+        });
+      } catch (e) {
+        logToConsole(`${preset.name} error: ${e.message}`, "error");
+        return null;
+      }
+    }
+    return team;
+  };
+
+  const allies = collectTeam(tbAllySlots, 0, "ally");
+  if (!allies) return;
+  const enemies = collectTeam(tbEnemySlots, 1, "opp");
+  if (!enemies) return;
+
+  if (allies.length < 1 || enemies.length < 1) {
+    logToConsole("Both teams need at least one bot.", "warn");
+    return;
   }
 
-  const participants = [
-    ...allies.map(({ preset, compiled }, i) => ({
-      program: compiled.program, constants: compiled.constants,
-      playerId: `ally_${preset.name.toLowerCase()}_${i}`, teamId: 0,
-    })),
-    ...opponents.map(({ preset, compiled }, i) => ({
-      program: compiled.program, constants: compiled.constants,
-      playerId: `opp_${preset.name.toLowerCase()}_${i}`, teamId: 1,
-    })),
-  ];
+  const participants = [...allies, ...enemies];
+  const total = participants.length;
+  const mode = total <= 2 ? "duel_1v1" : "squad_2v2";
 
-  const mode = participants.length <= 2 ? "duel_1v1" : "squad_2v2";
   const setup = {
     config: {
       mode, arenaWidth: ARENA_WIDTH, arenaHeight: ARENA_HEIGHT,
@@ -2119,7 +2187,9 @@ function doRunTeamBuilder() {
     participants,
   };
 
-  logToConsole(`\n--- Team Builder: ${allies.length}v${opponents.length} ---`, "event");
+  tbCloseModal();
+
+  logToConsole(`\n--- Team Builder: ${allies.length}v${enemies.length} ---`, "event");
   let result;
   try {
     telemetry.increment(Telemetry.MATCH_RUN);
@@ -2133,7 +2203,7 @@ function doRunTeamBuilder() {
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
   logToConsole(`Winner: ${result.winner === null ? "DRAW" : `Team ${result.winner}`} | ${result.reason} | ${result.tickCount} ticks`, "success");
-  showMatchResults(result, "Opponents");
+  showMatchResults(result, "Enemy Team");
   startReplay(result, "Team Battle");
 }
 
@@ -2175,10 +2245,21 @@ function toggleDecisionTraces() {
   }
 }
 
-// Wire Team Builder
-btnAddSlot?.addEventListener("click", addTeamSlot);
-btnRemoveSlot?.addEventListener("click", removeTeamSlot);
-btnRunTeamBuilder?.addEventListener("click", doRunTeamBuilder);
+// Wire Team Builder modal
+btnOpenTeamBuilder?.addEventListener("click", tbOpenModal);
+btnCloseTeamBuilder?.addEventListener("click", tbCloseModal);
+btnTbCancel?.addEventListener("click", tbCloseModal);
+btnTbRun?.addEventListener("click", tbRunBattle);
+
+// Add bot buttons inside modal
+for (const btn of document.querySelectorAll(".tb-add-btn")) {
+  btn.addEventListener("click", () => tbAddBot(btn.dataset.team, "bruiser"));
+}
+
+// Close modal on overlay click
+teamBuilderModal?.addEventListener("click", (e) => {
+  if (e.target === teamBuilderModal) tbCloseModal();
+});
 
 // Wire Arena toggles
 btnToggleTraces?.addEventListener("click", toggleDecisionTraces);

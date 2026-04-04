@@ -111,50 +111,9 @@
         <button id="btn-run-team-sim" class="btn btn-run team-sim-btn">Run Team Sim</button>
       </div>
 
-      <!-- Team Builder -->
-      <div class="sidebar-section team-builder-section">
-        <label>Team Builder</label>
-        <div class="team-builder-slots" id="team-builder-slots">
-          <div class="team-slot" data-slot="0">
-            <select class="team-slot-role" data-slot="0">
-              <option value="">Role...</option>
-              <option value="frontline">Frontline</option>
-              <option value="flanker">Flanker</option>
-              <option value="support">Support</option>
-              <option value="scout">Scout</option>
-            </select>
-            <select class="team-slot-script" data-slot="0">
-              <option value="bruiser">Bruiser</option>
-              <option value="kiter">Kiter</option>
-              <option value="fortress">Fortress</option>
-              <option value="healer">Healer</option>
-              <option value="flanker">Flanker</option>
-              <option value="sentinel">Sentinel</option>
-            </select>
-          </div>
-          <div class="team-slot" data-slot="1">
-            <select class="team-slot-role" data-slot="1">
-              <option value="">Role...</option>
-              <option value="frontline">Frontline</option>
-              <option value="flanker">Flanker</option>
-              <option value="support">Support</option>
-              <option value="scout">Scout</option>
-            </select>
-            <select class="team-slot-script" data-slot="1">
-              <option value="bruiser">Bruiser</option>
-              <option value="kiter">Kiter</option>
-              <option value="fortress">Fortress</option>
-              <option value="healer">Healer</option>
-              <option value="flanker">Flanker</option>
-              <option value="sentinel">Sentinel</option>
-            </select>
-          </div>
-        </div>
-        <div class="team-builder-actions">
-          <button id="btn-add-slot" class="btn-small" title="Add slot (max 5)">+ Slot</button>
-          <button id="btn-remove-slot" class="btn-small" title="Remove last slot">- Slot</button>
-          <button id="btn-run-team-builder" class="btn btn-run team-sim-btn">Run Team</button>
-        </div>
+      <!-- Team Builder Trigger -->
+      <div class="sidebar-section">
+        <button id="btn-open-team-builder" class="btn btn-team-builder-open">Team Builder</button>
       </div>
     </aside>
 
@@ -248,6 +207,40 @@
       </div>
 
     </main>
+  </div>
+
+  <!-- Team Builder Modal -->
+  <div id="team-builder-modal" class="tb-modal-overlay" hidden>
+    <div class="tb-modal">
+      <div class="tb-modal-header">
+        <h2>Team Builder</h2>
+        <button id="btn-close-team-builder" class="tb-modal-close" title="Close">&times;</button>
+      </div>
+      <div class="tb-modal-body">
+        <div class="tb-team tb-team-ally">
+          <div class="tb-team-header">
+            <span class="tb-team-label tb-label-ally">Your Team</span>
+            <button class="tb-add-btn" data-team="ally" title="Add bot">+ Add Bot</button>
+          </div>
+          <div class="tb-slots" id="tb-ally-slots"></div>
+        </div>
+        <div class="tb-vs">VS</div>
+        <div class="tb-team tb-team-enemy">
+          <div class="tb-team-header">
+            <span class="tb-team-label tb-label-enemy">Enemy Team</span>
+            <button class="tb-add-btn" data-team="enemy" title="Add bot">+ Add Bot</button>
+          </div>
+          <div class="tb-slots" id="tb-enemy-slots"></div>
+        </div>
+      </div>
+      <div class="tb-modal-footer">
+        <span class="tb-match-info" id="tb-match-info">0 vs 0</span>
+        <div class="tb-footer-actions">
+          <button id="btn-tb-cancel" class="tb-btn-secondary">Cancel</button>
+          <button id="btn-tb-run" class="tb-btn-primary">Run Battle</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="js/app.js"></script>
