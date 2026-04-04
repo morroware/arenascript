@@ -32,6 +32,16 @@ const BUILTIN_SENSORS = new Set([
   "recall_position",
   // State queries
   "is_taunted", "is_in_overwatch", "has_effect",
+  // Resource economy
+  "heat", "max_heat", "heat_percent", "overheated",
+  "ammo", "max_ammo", "ammo_percent",
+  // Cloak + self-destruct state
+  "is_cloaked", "cloak_remaining",
+  "self_destruct_armed", "self_destruct_remaining",
+  // Resupply depots
+  "nearest_depot", "is_on_depot",
+  // Hive (shared team memory)
+  "hive_get", "hive_set", "hive_has",
 ]);
 
 const VALID_ACTIONS = new Set([
@@ -41,6 +51,9 @@ const VALID_ACTIONS = new Set([
   "burst_fire", "grenade",
   "move_forward", "move_backward", "turn_left", "turn_right",
   "place_mine", "send_signal", "mark_position", "taunt", "overwatch",
+  // Resource economy + advanced combat
+  "fire_light", "fire_heavy", "zap", "vent_heat",
+  "cloak", "self_destruct",
 ]);
 
 const VALID_TYPES = new Set([

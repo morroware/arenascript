@@ -11,7 +11,41 @@ import {
   GRENADE_DAMAGE, GRENADE_RADIUS, GRENADE_RANGE, GRENADE_COOLDOWN, GRENADE_ENERGY_COST,
   SHIELD_DURATION, SHIELD_COOLDOWN, SHIELD_ENERGY_COST, LOW_HEALTH_THRESHOLD,
   PICKUP_DAMAGE_MULTIPLIER,
+  HEAT_MAX, HEAT_RECOVERY_THRESHOLD, HEAT_DECAY_PER_TICK,
+  HEAT_ATTACK, HEAT_FIRE_AT, HEAT_FIRE_LIGHT, HEAT_FIRE_HEAVY, HEAT_BURST_FIRE,
+  HEAT_GRENADE, HEAT_SHIELD, HEAT_ZAP, HEAT_CLOAK_PER_TICK,
+  AMMO_FIRE_AT, AMMO_FIRE_LIGHT, AMMO_FIRE_HEAVY, AMMO_BURST_FIRE, AMMO_GRENADE,
+  FIRE_LIGHT_DAMAGE, FIRE_LIGHT_RANGE, FIRE_LIGHT_SPEED, FIRE_LIGHT_COOLDOWN,
+  FIRE_HEAVY_DAMAGE, FIRE_HEAVY_RANGE, FIRE_HEAVY_SPEED, FIRE_HEAVY_COOLDOWN,
+  ZAP_RADIUS, ZAP_DAMAGE, ZAP_SELF_DAMAGE, ZAP_COOLDOWN, ZAP_ENERGY_COST,
 } from "../shared/config.js";
+
+/** Add heat to a robot, clamping to HEAT_MAX and setting overheated flag. */
+function addHeat(robot, amount) {
+  robot.heat = Math.min(HEAT_MAX, (robot.heat ?? 0) + amount);
+  if (robot.heat >= HEAT_MAX) {
+    robot.overheated = true;
+  }
+}
+
+/** Returns true if robot can fire — not overheated and has enough ammo. */
+function canFire(robot, ammoCost) {
+  if (robot.overheated) return false;
+  if ((robot.ammo ?? 0) < ammoCost) return false;
+  return true;
+}
+
+function consumeAmmo(robot, amount) {
+  robot.ammo = Math.max(0, (robot.ammo ?? 0) - amount);
+}
+
+/** Break cloak when robot acts offensively or takes damage. */
+function breakCloak(robot) {
+  if (robot.cloakActive) {
+    robot.cloakActive = false;
+    robot.cloakExpiresTick = 0;
+  }
+}
 
 /** Resolve a combat action for a robot */
 export function resolveCombat(world, robot, action) {
@@ -25,6 +59,7 @@ export function resolveCombat(world, robot, action) {
       if (!targetId) break;
       const target = world.getRobot(targetId);
       if (!target || !target.alive) break;
+      if (robot.overheated) break;
       const visibleEnemyIds = new Set(getVisibleEnemies(world, robot).map(enemy => enemy.id));
       if (!visibleEnemyIds.has(target.id)) break;
 
@@ -44,6 +79,8 @@ export function resolveCombat(world, robot, action) {
       applyDamage(world, target, damage, robot.id);
       robot.cooldowns.set("attack", cooldown);
       robot.energy = Math.max(0, robot.energy - ATTACK_ENERGY_COST);
+      addHeat(robot, HEAT_ATTACK);
+      breakCloak(robot);
 
       // Face the target
       const dir = normalize(sub(target.position, robot.position));
@@ -54,6 +91,7 @@ export function resolveCombat(world, robot, action) {
     case "fire_at": {
       const targetPos = resolveTargetPosition(world, action);
       if (!targetPos) break;
+      if (!canFire(robot, AMMO_FIRE_AT)) break;
       if (!hasLineOfSight(world, robot.position, targetPos)) break;
 
       if (distance(robot.position, targetPos) > FIRE_AT_RANGE) break;
@@ -71,6 +109,62 @@ export function resolveCombat(world, robot, action) {
 
       robot.cooldowns.set("attack", FIRE_AT_COOLDOWN);
       robot.energy = Math.max(0, robot.energy - ATTACK_ENERGY_COST);
+      consumeAmmo(robot, AMMO_FIRE_AT);
+      addHeat(robot, HEAT_FIRE_AT);
+      breakCloak(robot);
+      robot.heading = dir;
+      break;
+    }
+
+    case "fire_light": {
+      // Rapid, low-damage, long-range, fast-travelling projectile
+      const targetPos = resolveTargetPosition(world, action);
+      if (!targetPos) break;
+      if (!canFire(robot, AMMO_FIRE_LIGHT)) break;
+      if (!hasLineOfSight(world, robot.position, targetPos)) break;
+      if (distance(robot.position, targetPos) > FIRE_LIGHT_RANGE) break;
+      const cd = robot.cooldowns.get("attack") ?? 0;
+      if (cd > 0) break;
+
+      const dir = normalize(sub(targetPos, robot.position));
+      const vel = scale(dir, FIRE_LIGHT_SPEED);
+      let dmg = FIRE_LIGHT_DAMAGE;
+      if (robot.activeEffects?.some(e => e.type === "damage")) {
+        dmg = Math.round(dmg * PICKUP_DAMAGE_MULTIPLIER);
+      }
+      world.spawnProjectile(robot.id, { ...robot.position }, vel, dmg, PROJECTILE_TTL);
+      robot.cooldowns.set("attack", FIRE_LIGHT_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - Math.floor(ATTACK_ENERGY_COST / 2));
+      consumeAmmo(robot, AMMO_FIRE_LIGHT);
+      addHeat(robot, HEAT_FIRE_LIGHT);
+      breakCloak(robot);
+      robot.heading = dir;
+      break;
+    }
+
+    case "fire_heavy": {
+      // Slow, high-damage, harder-to-dodge but expensive
+      const targetPos = resolveTargetPosition(world, action);
+      if (!targetPos) break;
+      if (!canFire(robot, AMMO_FIRE_HEAVY)) break;
+      if (!hasLineOfSight(world, robot.position, targetPos)) break;
+      if (distance(robot.position, targetPos) > FIRE_HEAVY_RANGE) break;
+      const cd = robot.cooldowns.get("attack") ?? 0;
+      if (cd > 0) break;
+
+      const dir = normalize(sub(targetPos, robot.position));
+      const vel = scale(dir, FIRE_HEAVY_SPEED);
+      let dmg = FIRE_HEAVY_DAMAGE;
+      if (robot.activeEffects?.some(e => e.type === "damage")) {
+        dmg = Math.round(dmg * PICKUP_DAMAGE_MULTIPLIER);
+      }
+      // Heavy rounds live longer so their slower velocity still reaches distant targets.
+      world.spawnProjectile(robot.id, { ...robot.position }, vel, dmg, PROJECTILE_TTL * 2);
+      robot.cooldowns.set("attack", FIRE_HEAVY_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - ATTACK_ENERGY_COST * 2);
+      consumeAmmo(robot, AMMO_FIRE_HEAVY);
+      addHeat(robot, HEAT_FIRE_HEAVY);
+      breakCloak(robot);
       robot.heading = dir;
       break;
     }
@@ -78,6 +172,7 @@ export function resolveCombat(world, robot, action) {
     case "burst_fire": {
       const targetPos = resolveTargetPosition(world, action);
       if (!targetPos) break;
+      if (!canFire(robot, AMMO_BURST_FIRE)) break;
       if (!hasLineOfSight(world, robot.position, targetPos)) break;
       if (distance(robot.position, targetPos) > BURST_FIRE_RANGE) break;
       const cd = robot.cooldowns.get("attack") ?? 0;
@@ -96,6 +191,9 @@ export function resolveCombat(world, robot, action) {
       }
       robot.cooldowns.set("attack", BURST_FIRE_COOLDOWN);
       robot.energy = Math.max(0, robot.energy - BURST_FIRE_ENERGY_COST);
+      consumeAmmo(robot, AMMO_BURST_FIRE);
+      addHeat(robot, HEAT_BURST_FIRE);
+      breakCloak(robot);
       robot.heading = baseDir;
       break;
     }
@@ -103,6 +201,7 @@ export function resolveCombat(world, robot, action) {
     case "grenade": {
       const targetPos = resolveTargetPosition(world, action);
       if (!targetPos) break;
+      if (!canFire(robot, AMMO_GRENADE)) break;
       if (distance(robot.position, targetPos) > GRENADE_RANGE) break;
       const cd = robot.cooldowns.get("attack") ?? 0;
       if (cd > 0) break;
@@ -132,7 +231,33 @@ export function resolveCombat(world, robot, action) {
       }
       robot.cooldowns.set("attack", GRENADE_COOLDOWN);
       robot.energy = Math.max(0, robot.energy - GRENADE_ENERGY_COST);
+      consumeAmmo(robot, AMMO_GRENADE);
+      addHeat(robot, HEAT_GRENADE);
+      breakCloak(robot);
       robot.heading = normalize(sub(targetPos, robot.position));
+      break;
+    }
+
+    case "zap": {
+      // Short-range energy discharge. Hits all enemies in radius, damages self.
+      const cd = robot.cooldowns.get("zap") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < ZAP_ENERGY_COST) break;
+      if (robot.overheated) break;
+      let hit = 0;
+      for (const other of world.getAliveRobots()) {
+        if (other.teamId === robot.teamId) continue;
+        if (distance(other.position, robot.position) <= ZAP_RADIUS) {
+          applyDamage(world, other, ZAP_DAMAGE, robot.id);
+          hit++;
+        }
+      }
+      // Self-damage regardless of whether anyone was hit (prevents spam)
+      applyDamage(world, robot, ZAP_SELF_DAMAGE, robot.id);
+      robot.cooldowns.set("zap", ZAP_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - ZAP_ENERGY_COST);
+      addHeat(robot, HEAT_ZAP);
+      breakCloak(robot);
       break;
     }
 
@@ -144,6 +269,13 @@ export function resolveCombat(world, robot, action) {
       robot.health = Math.min(robot.maxHealth, robot.health + shieldHeal);
       robot.cooldowns.set("shield", SHIELD_COOLDOWN);
       robot.energy = Math.max(0, robot.energy - SHIELD_ENERGY_COST);
+      addHeat(robot, HEAT_SHIELD);
+      break;
+    }
+
+    case "vent_heat": {
+      // Spend the combat slot this tick cooling aggressively. Applied in updateCooldowns.
+      robot.ventingHeat = true;
       break;
     }
 
@@ -157,6 +289,11 @@ export function resolveCombat(world, robot, action) {
 /** Apply damage to a robot, emit events */
 export function applyDamage(world, target, damage, sourceId) {
   target.health -= damage;
+  // Taking damage breaks cloak.
+  if (target.cloakActive) {
+    target.cloakActive = false;
+    target.cloakExpiresTick = 0;
+  }
 
   world.emitEvent({
     type: "damaged",
@@ -243,7 +380,7 @@ export function updateProjectiles(world) {
   }
 }
 
-/** Update cooldowns for all robots */
+/** Update cooldowns for all robots. Also handles heat decay and cloak upkeep. */
 export function updateCooldowns(world) {
   for (const robot of world.robots.values()) {
     if (!robot.alive) continue;
@@ -254,6 +391,30 @@ export function updateCooldowns(world) {
     }
     // Regenerate energy slightly
     robot.energy = Math.min(robot.maxEnergy, robot.energy + 1);
+
+    // --- Heat decay ---
+    const dissipation = robot.heatDissipation ?? 1.0;
+    let decay = HEAT_DECAY_PER_TICK * dissipation;
+    if (robot.ventingHeat) {
+      decay += 6; // extra cooling when venting
+      robot.ventingHeat = false;
+    }
+    robot.heat = Math.max(0, (robot.heat ?? 0) - decay);
+    // Overheat recovery: must cool below the threshold before re-enabling combat.
+    if (robot.overheated && robot.heat <= HEAT_RECOVERY_THRESHOLD) {
+      robot.overheated = false;
+    }
+
+    // --- Cloak upkeep ---
+    if (robot.cloakActive) {
+      if (world.currentTick >= robot.cloakExpiresTick || robot.energy <= 0) {
+        robot.cloakActive = false;
+        robot.cloakExpiresTick = 0;
+      } else {
+        robot.energy = Math.max(0, robot.energy - 1);
+        robot.heat = Math.min(HEAT_MAX, robot.heat + HEAT_CLOAK_PER_TICK);
+      }
+    }
   }
 }
 

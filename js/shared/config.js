@@ -105,6 +105,62 @@ export const TAUNT_ENERGY_COST = 15;
 // --- Destructible Cover ---
 export const DESTRUCTIBLE_COVER_HP = 50;
 export const DESTRUCTIBLE_COVER_RATIO = 0.3; // fraction of covers that are destructible
+// --- Heat System ---
+// Heat accumulates from combat/ability use. At HEAT_MAX the robot is "overheated"
+// and cannot use combat actions until heat drops below HEAT_RECOVERY_THRESHOLD.
+export const HEAT_MAX = 100;
+export const HEAT_RECOVERY_THRESHOLD = 60;
+export const HEAT_DECAY_PER_TICK = 2;
+export const HEAT_DECAY_VENT = 6;      // when 'vent_heat' is the combat action
+export const HEAT_ATTACK = 6;          // melee attack
+export const HEAT_FIRE_AT = 10;        // standard ranged
+export const HEAT_FIRE_LIGHT = 5;      // low-power rapid fire
+export const HEAT_FIRE_HEAVY = 20;     // high-power slow shot
+export const HEAT_BURST_FIRE = 18;
+export const HEAT_GRENADE = 28;
+export const HEAT_SHIELD = 8;
+export const HEAT_ZAP = 14;
+export const HEAT_CLOAK_PER_TICK = 1;  // heat generated each tick while cloaked
+// --- Ammo System ---
+// Ammo is a finite per-spawn resource, replenished by resupply depots.
+export const AMMO_FIRE_AT = 2;
+export const AMMO_FIRE_LIGHT = 1;
+export const AMMO_FIRE_HEAVY = 4;
+export const AMMO_BURST_FIRE = 6;
+export const AMMO_GRENADE = 8;
+// Melee attack, zap, shield, self_destruct cost no ammo.
+// --- Resupply Depots ---
+export const DEPOT_COUNT = 2;           // per match (one per half)
+export const DEPOT_RADIUS = 3.0;
+export const DEPOT_AMMO_PER_TICK = 3;   // ammo restored each tick inside
+export const DEPOT_HEAT_VENT_PER_TICK = 4; // heat removed each tick inside
+// --- Cloak ---
+export const CLOAK_DURATION = 60;       // max ticks of cloak
+export const CLOAK_COOLDOWN = 90;
+export const CLOAK_ENERGY_COST = 20;
+export const CLOAK_BREAK_DISTANCE = 4.0; // enemies within this range see through cloak
+// --- Zap (short-range energy discharge) ---
+export const ZAP_RADIUS = 4.0;
+export const ZAP_DAMAGE = 18;
+export const ZAP_SELF_DAMAGE = 5;
+export const ZAP_COOLDOWN = 16;
+export const ZAP_ENERGY_COST = 25;
+// --- Self-Destruct ---
+export const SELF_DESTRUCT_COUNTDOWN = 30;   // ticks from command to detonation
+export const SELF_DESTRUCT_RADIUS = 7.0;
+export const SELF_DESTRUCT_DAMAGE = 60;
+export const SELF_DESTRUCT_HEALTH_THRESHOLD = 0.35; // only available at <=35% HP
+// --- Fire power variants (bullet speed/damage tradeoff) ---
+export const FIRE_LIGHT_DAMAGE = 4;
+export const FIRE_LIGHT_RANGE = 18.0;
+export const FIRE_LIGHT_SPEED = 6.0;
+export const FIRE_LIGHT_COOLDOWN = 4;
+export const FIRE_HEAVY_DAMAGE = 22;
+export const FIRE_HEAVY_RANGE = 14.0;
+export const FIRE_HEAVY_SPEED = 2.2;
+export const FIRE_HEAVY_COOLDOWN = 14;
+// --- Hive Memory (shared team key/value store) ---
+export const HIVE_MAX_KEYS = 32;
 // --- Ranked ---
 export const INITIAL_ELO = 1000;
 export const ELO_K_FACTOR = 32;
@@ -126,6 +182,8 @@ export const CLASS_STATS = {
         attackRange: 3.5,
         attackCooldown: 4,
         visionRange: 28.0,
+        maxAmmo: 50,
+        heatDissipation: 2.2,  // multiplier on HEAT_DECAY_PER_TICK
     },
     ranger: {
         health: 80,
@@ -135,6 +193,8 @@ export const CLASS_STATS = {
         attackRange: 8.0,
         attackCooldown: 6,
         visionRange: 40.0,
+        maxAmmo: 100,
+        heatDissipation: 1.0,
     },
     tank: {
         health: 150,
@@ -144,6 +204,8 @@ export const CLASS_STATS = {
         attackRange: 4.0,
         attackCooldown: 5,
         visionRange: 24.0,
+        maxAmmo: 80,
+        heatDissipation: 0.7,   // tanks overheat more easily (bigger guns)
     },
     support: {
         health: 90,
@@ -153,5 +215,7 @@ export const CLASS_STATS = {
         attackRange: 6.0,
         attackCooldown: 7,
         visionRange: 32.0,
+        maxAmmo: 70,
+        heatDissipation: 1.5,
     },
 };

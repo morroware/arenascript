@@ -12,6 +12,9 @@ import {
   DEFAULT_VISION_RANGE,
   MINE_VISIBLE_RANGE,
   NOISE_DECAY_TICKS,
+  CLOAK_BREAK_DISTANCE,
+  HEAT_MAX,
+  HEAT_RECOVERY_THRESHOLD,
 } from "../shared/config.js";
 
 /** Convert a RobotState to a safe VM-visible object */
@@ -32,7 +35,10 @@ export function createSensorGateway(world) {
     for (const other of world.robots.values()) {
       if (!other.alive) continue;
       if (other.teamId === robot.teamId) continue;
-      if (distance(robot.position, other.position) > range) continue;
+      const d = distance(robot.position, other.position);
+      if (d > range) continue;
+      // Cloaked enemies don't show up on scan beyond point-blank range
+      if (other.cloakActive && d > CLOAK_BREAK_DISTANCE) continue;
       // Scan still requires line of sight (no wallhack)
       if (!hasLineOfSight(world, robot.position, other.position)) continue;
       detected.push(other);
@@ -96,6 +102,80 @@ export function createSensorGateway(world) {
 
       case "energy":
         return robot.energy;
+
+      // --- Resource Economy ---
+      case "heat":
+        return Math.round(robot.heat ?? 0);
+      case "max_heat":
+        return HEAT_MAX;
+      case "heat_percent":
+        return Math.round(((robot.heat ?? 0) / HEAT_MAX) * 100);
+      case "overheated":
+        return !!robot.overheated;
+      case "ammo":
+        return robot.ammo ?? 0;
+      case "max_ammo":
+        return robot.maxAmmo ?? 0;
+      case "ammo_percent":
+        return (robot.maxAmmo ?? 0) === 0 ? 0 : Math.round(((robot.ammo ?? 0) / robot.maxAmmo) * 100);
+
+      // --- Cloak state ---
+      case "is_cloaked":
+        return !!robot.cloakActive;
+      case "cloak_remaining":
+        return robot.cloakActive ? Math.max(0, robot.cloakExpiresTick - world.currentTick) : 0;
+
+      // --- Self-destruct countdown ---
+      case "self_destruct_armed":
+        return (robot.selfDestructTick ?? 0) > 0;
+      case "self_destruct_remaining":
+        return (robot.selfDestructTick ?? 0) > 0
+          ? Math.max(0, robot.selfDestructTick - world.currentTick)
+          : 0;
+
+      // --- Resupply Depot ---
+      case "nearest_depot": {
+        let nearestDist = Infinity;
+        let nearest = null;
+        for (const depot of world.depots.values()) {
+          const d = distance(robot.position, depot.position);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = {
+              id: depot.id,
+              position: { x: depot.position.x, y: depot.position.y },
+              radius: depot.radius,
+              distance: Math.round(d),
+            };
+          }
+        }
+        return nearest;
+      }
+      case "is_on_depot": {
+        for (const depot of world.depots.values()) {
+          if (distance(robot.position, depot.position) <= depot.radius) return true;
+        }
+        return false;
+      }
+
+      // --- Hive (shared team memory) ---
+      case "hive_get": {
+        const key = args[0];
+        if (typeof key !== "string") return null;
+        return world.hiveGet(robot.teamId, key);
+      }
+      case "hive_set": {
+        const key = args[0];
+        if (typeof key !== "string") return null;
+        const value = args[1] ?? null;
+        world.hiveSet(robot.teamId, key, value);
+        return value;
+      }
+      case "hive_has": {
+        const key = args[0];
+        if (typeof key !== "string") return false;
+        return world.hiveGet(robot.teamId, key) !== null;
+      }
 
       case "position":
         return { x: robot.position.x, y: robot.position.y };

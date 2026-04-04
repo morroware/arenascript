@@ -8,6 +8,7 @@ import {
   ROBOT_BASE_HEALTH, ROBOT_BASE_ENERGY, CLASS_STATS,
   HAZARD_DAMAGE_PER_TICK, HAZARD_ZONE_RADIUS,
   DESTRUCTIBLE_COVER_HP,
+  HEAT_MAX, DEPOT_RADIUS,
 } from "../shared/config.js";
 
 let nextId = 0;
@@ -29,8 +30,11 @@ export class World {
   hazards = new Map();
   mines = new Map();
   pickups = new Map();
+  depots = new Map();
   noiseEvents = [];   // { position, radius, sourceName, tick }
   pendingSignals = []; // { senderId, teamId, data, position, range, tick }
+  hiveMemory = new Map(); // teamId -> Map<string, value> (shared team memory)
+  pendingDetonations = []; // { ownerId, teamId, position, triggerTick, radius, damage, kind }
   currentTick = 0;
   config;
   rng;
@@ -59,7 +63,10 @@ export class World {
       attackDamage: 10,
       attackRange: 5.0,
       attackCooldown: 5,
+      maxAmmo: 80,
+      heatDissipation: 1.0,
     };
+    const maxAmmo = stats.maxAmmo ?? 80;
 
     // Spawn at given position or random position within arena bounds
     // Clone provided position to prevent shared mutable references
@@ -107,6 +114,18 @@ export class World {
       overwatchExpiresTick: 0,
       activeEffects: [],     // pickup effects: { type, expiresTick }
       signalCooldownTick: 0,
+      // --- Resource Economy (Heat + Ammo) ---
+      heat: 0,
+      maxHeat: HEAT_MAX,
+      overheated: false,
+      ammo: maxAmmo,
+      maxAmmo,
+      heatDissipation: stats.heatDissipation ?? 1.0,
+      // --- Cloak ---
+      cloakActive: false,
+      cloakExpiresTick: 0,
+      // --- Self-Destruct ---
+      selfDestructTick: 0,   // 0 = not armed; >0 = tick it will detonate
     };
 
     this.robots.set(id, robot);
@@ -157,6 +176,28 @@ export class World {
     const mine = { id, ownerId, teamId, position: { ...position }, damage };
     this.mines.set(id, mine);
     return mine;
+  }
+
+  addDepot(position, radius = DEPOT_RADIUS) {
+    const id = generateId("depot");
+    const depot = { id, position: { x: position.x, y: position.y }, radius };
+    this.depots.set(id, depot);
+    return depot;
+  }
+
+  hiveSet(teamId, key, value) {
+    let teamMap = this.hiveMemory.get(teamId);
+    if (!teamMap) {
+      teamMap = new Map();
+      this.hiveMemory.set(teamId, teamMap);
+    }
+    teamMap.set(key, value);
+  }
+
+  hiveGet(teamId, key) {
+    const teamMap = this.hiveMemory.get(teamId);
+    if (!teamMap) return null;
+    return teamMap.has(key) ? teamMap.get(key) : null;
   }
 
   addPickup(position, type) {

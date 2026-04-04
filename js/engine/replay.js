@@ -27,6 +27,11 @@ export class ReplayWriter {
       heading: { x: r.heading.x, y: r.heading.y },
       health: r.health,
       energy: r.energy,
+      heat: Math.round(r.heat ?? 0),
+      ammo: r.ammo ?? 0,
+      overheated: !!r.overheated,
+      cloaked: !!r.cloakActive,
+      selfDestructing: (r.selfDestructTick ?? 0) > 0,
       alive: r.alive,
       action: actions.get(r.id),
     }));
@@ -95,6 +100,9 @@ export class ReplayWriter {
       })),
       hazards: [...world.hazards.values()].map(h => ({
         x: h.position.x, y: h.position.y, radius: h.radius,
+      })),
+      depots: [...world.depots.values()].map(d => ({
+        x: d.position.x, y: d.position.y, radius: d.radius,
       })),
     };
   }
