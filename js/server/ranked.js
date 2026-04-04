@@ -13,11 +13,12 @@ function getKFactor(rating) {
 /** Calculate new Elo ratings after a match */
 export function calculateEloChange(winnerRating, loserRating) {
     const expectedWin = expectedScore(winnerRating, loserRating);
-    const expectedLose = expectedScore(loserRating, winnerRating);
+    // Use the average K-factor for both players to maintain zero-sum
     const kWinner = getKFactor(winnerRating);
     const kLoser = getKFactor(loserRating);
-    const winnerDelta = Math.round(kWinner * (1 - expectedWin));
-    const loserDelta = Math.round(kLoser * (0 - expectedLose));
+    const k = (kWinner + kLoser) / 2;
+    const winnerDelta = Math.round(k * (1 - expectedWin));
+    const loserDelta = -winnerDelta; // Ensure zero-sum
     return {
         winnerNew: winnerRating + winnerDelta,
         loserNew: Math.max(0, loserRating + loserDelta),
@@ -80,10 +81,12 @@ export class RatingStore {
         winner.tier = getRankTier(winnerNew);
         winner.wins++;
         winner.matchHistory.push(matchId);
+        if (winner.matchHistory.length > 200) winner.matchHistory.shift();
         loser.elo = loserNew;
         loser.tier = getRankTier(loserNew);
         loser.losses++;
         loser.matchHistory.push(matchId);
+        if (loser.matchHistory.length > 200) loser.matchHistory.shift();
         return { winnerRating: winner, loserRating: loser };
     }
     /** Update ratings after a draw */
@@ -95,10 +98,12 @@ export class RatingStore {
         a.tier = getRankTier(newA);
         a.draws++;
         a.matchHistory.push(matchId);
+        if (a.matchHistory.length > 200) a.matchHistory.shift();
         b.elo = newB;
         b.tier = getRankTier(newB);
         b.draws++;
         b.matchHistory.push(matchId);
+        if (b.matchHistory.length > 200) b.matchHistory.shift();
     }
     /** Get leaderboard sorted by Elo descending */
     getLeaderboard(limit = 100) {

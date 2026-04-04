@@ -491,7 +491,7 @@ export class Parser {
     let expr = this.#parsePrimary();
 
     while (true) {
-      if (this.#check(TokenType.LeftParen) && expr.kind === "Identifier") {
+      if (this.#check(TokenType.LeftParen) && (expr.kind === "Identifier" || expr.kind === "MemberExpr")) {
         const span = expr.span;
         this.#advance();
         const args = [];
@@ -502,7 +502,10 @@ export class Parser {
           }
         }
         this.#expect(TokenType.RightParen);
-        expr = { kind: "CallExpr", callee: expr.name, args, span };
+        // For member expressions, flatten to callee string "object.property"
+        // For identifiers, use the name directly
+        const callee = expr.kind === "Identifier" ? expr.name : expr;
+        expr = { kind: "CallExpr", callee, args, span };
       } else if (this.#check(TokenType.Dot)) {
         const span = this.#currentSpan();
         this.#advance();

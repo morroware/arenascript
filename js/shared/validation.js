@@ -10,6 +10,7 @@ const VALID_MODES = [
   "duel_1v1",
   "squad_2v2",
   "2v1_unranked",
+  "tournament",
   "test",
 ];
 
@@ -21,6 +22,7 @@ const MODE_PLAYER_COUNTS = {
   "squad_2v2": { min: 2, max: 4 },
   "ffa": { min: 2, max: 8 },
   "2v1_unranked": { min: 2, max: 3 },
+  "tournament": { min: 2, max: 2 },
   "test": { min: 1, max: Infinity },
 };
 
@@ -131,12 +133,16 @@ export function validateParticipant(participant) {
       || (ArrayBuffer.isView(bytecode) && !(bytecode instanceof DataView));
     if (!isBytecodeArray) {
       errors.push("participant.program.bytecode must be an array or typed array");
+    } else if (bytecode.length > 65535) {
+      errors.push("participant.program.bytecode exceeds maximum size of 65535 bytes");
     }
     if (!Array.isArray(participant.program.stateSlots)) {
       errors.push("participant.program.stateSlots must be an array");
     }
     if (participant.program.eventHandlers == null || typeof participant.program.eventHandlers !== "object") {
       errors.push("participant.program.eventHandlers must be an object or Map");
+    } else if (!(participant.program.eventHandlers instanceof Map) && typeof participant.program.eventHandlers.get !== "function") {
+      errors.push("participant.program.eventHandlers must be a Map (with .get() method)");
     }
   }
 
@@ -185,6 +191,17 @@ export function validateMatchRequest(request) {
         for (const err of pResult.errors) {
           errors.push(`participants[${i}]: ${err}`);
         }
+      }
+    }
+
+    // Check for duplicate playerIds
+    const playerIds = new Set();
+    for (const p of request.participants) {
+      if (p && p.playerId) {
+        if (playerIds.has(p.playerId)) {
+          errors.push(`Duplicate playerId '${p.playerId}'`);
+        }
+        playerIds.add(p.playerId);
       }
     }
 

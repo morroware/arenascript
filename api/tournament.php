@@ -224,12 +224,28 @@ class TournamentManager
                     $tournament['participants'][$match['participant1Index']]['eliminated'] = true;
                 }
             } else {
-                // Draw — in single elimination, give it to higher seed
-                $match['winner'] = $match['participant1Index'];
-                $tournament['participants'][$match['participant1Index']]['wins']++;
-                $tournament['participants'][$match['participant2Index']]['losses']++;
-                if ($tournament['format'] === 'single_elimination') {
-                    $tournament['participants'][$match['participant2Index']]['eliminated'] = true;
+                // Draw — mark as draw, no elimination in single_elimination (replay would be needed)
+                $match['winner'] = null;
+                $match['draw'] = true;
+                // In non-elimination formats, award half a win to each
+                if ($tournament['format'] !== 'single_elimination') {
+                    $tournament['participants'][$match['participant1Index']]['draws'] = ($tournament['participants'][$match['participant1Index']]['draws'] ?? 0) + 1;
+                    $tournament['participants'][$match['participant2Index']]['draws'] = ($tournament['participants'][$match['participant2Index']]['draws'] ?? 0) + 1;
+                } else {
+                    // In single elimination, higher seed (lower number) advances
+                    $p1Seed = $tournament['participants'][$match['participant1Index']]['seed'] ?? PHP_INT_MAX;
+                    $p2Seed = $tournament['participants'][$match['participant2Index']]['seed'] ?? PHP_INT_MAX;
+                    if ($p1Seed <= $p2Seed) {
+                        $match['winner'] = $match['participant1Index'];
+                        $tournament['participants'][$match['participant1Index']]['wins']++;
+                        $tournament['participants'][$match['participant2Index']]['losses']++;
+                        $tournament['participants'][$match['participant2Index']]['eliminated'] = true;
+                    } else {
+                        $match['winner'] = $match['participant2Index'];
+                        $tournament['participants'][$match['participant2Index']]['wins']++;
+                        $tournament['participants'][$match['participant1Index']]['losses']++;
+                        $tournament['participants'][$match['participant1Index']]['eliminated'] = true;
+                    }
                 }
             }
         }

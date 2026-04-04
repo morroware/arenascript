@@ -20,6 +20,7 @@ class ChunkBuilder {
   constants = [];
   locals = [];
   localCount = 0;
+  maxLocalCount = 0;
   scopeDepth = 0;
   sourceMap = new Map();
 
@@ -70,6 +71,9 @@ class ChunkBuilder {
 
   declareLocal(name) {
     const slot = this.localCount++;
+    if (this.localCount > this.maxLocalCount) {
+      this.maxLocalCount = this.localCount;
+    }
     this.locals.push({ name, slot, depth: this.scopeDepth });
     return slot;
   }
@@ -88,6 +92,7 @@ class ChunkBuilder {
   endScope() {
     while (this.locals.length > 0 && this.locals[this.locals.length - 1].depth === this.scopeDepth) {
       this.locals.pop();
+      this.localCount--;
     }
     this.scopeDepth--;
   }
@@ -96,7 +101,7 @@ class ChunkBuilder {
     return {
       code: this.code,
       constants: this.constants,
-      localCount: this.localCount,
+      localCount: this.maxLocalCount,
       sourceMap: this.sourceMap,
     };
   }
@@ -106,6 +111,7 @@ export class Compiler {
   #stateSlots = [];
   #stateIndexMap = new Map();
   #constMap = new Map();
+  #evaluatedConstants = new Map();
   #functionOffsets = new Map();
   #userFunctionNames = new Set();
   #pendingCalls = [];
@@ -114,6 +120,7 @@ export class Compiler {
     this.#stateSlots = [];
     this.#stateIndexMap = new Map();
     this.#constMap = new Map();
+    this.#evaluatedConstants = new Map();
     this.#functionOffsets = new Map();
     this.#userFunctionNames = new Set();
     this.#pendingCalls = [];
@@ -140,6 +147,7 @@ export class Compiler {
     if (program.constants) {
       for (const entry of program.constants.entries) {
         const val = this.#evaluateConstantExpr(entry.value);
+        this.#evaluatedConstants.set(entry.name, val);
         let constIdx;
         if (typeof val === "number") {
           constIdx = builder.addConstant({ type: "number", value: val });
@@ -526,6 +534,17 @@ export class Compiler {
       case "StringLiteral": return expr.value;
       case "BooleanLiteral": return expr.value;
       case "NullLiteral": return null;
+      case "Identifier": {
+        // Allow constants to reference previously-defined constants
+        const constIdx = this.#constMap.get(expr.name);
+        if (constIdx !== undefined) {
+          // Temporary: look up from stateSlots which stores evaluated values
+          // Actually need to get the value from the already-processed constants
+          // #constMap maps name -> constant pool index, so find the entry
+          return this.#evaluatedConstants?.get(expr.name) ?? null;
+        }
+        return null;
+      }
       case "UnaryExpr": {
         const operand = this.#evaluateConstantExpr(expr.operand);
         if (expr.operator === "-" && typeof operand === "number") return -operand;

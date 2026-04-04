@@ -21,7 +21,7 @@ export function distance(a, b) {
 }
 export function normalize(v) {
     const len = length(v);
-    if (len === 0)
+    if (len === 0 || !isFinite(len))
         return { x: 0, y: 0 };
     return { x: v.x / len, y: v.y / len };
 }
@@ -41,5 +41,5 @@ export function lerp(a, b, t) {
     };
 }
 export function equals(a, b, epsilon = 0.001) {
-    return Math.abs(a.x - b.x) < epsilon && Math.abs(a.y - b.y) < epsilon;
+    return Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon;
 }

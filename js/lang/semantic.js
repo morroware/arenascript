@@ -236,7 +236,11 @@ export class SemanticAnalyzer {
 
       case "SetStatement":
         if (!this.#stateVars.has(stmt.name)) {
-          this.#addError(`'set' can only mutate state variables. '${stmt.name}' is not declared in state {}`, stmt.span.line, stmt.span.column);
+          if (this.#constants.has(stmt.name)) {
+            this.#addError(`Cannot mutate constant '${stmt.name}'. Constants are immutable`, stmt.span.line, stmt.span.column);
+          } else {
+            this.#addError(`'set' can only mutate state variables. '${stmt.name}' is not declared in state {}`, stmt.span.line, stmt.span.column);
+          }
         }
         this.#validateExpression(stmt.value);
         break;

@@ -29,35 +29,35 @@ export class ExecutionBudget {
 
   tick() {
     this.instructions--;
-    if (this.instructions <= 0) {
+    if (this.instructions < 0) {
       throw new BudgetExceededError("instructions");
     }
   }
 
   callFunction() {
     this.functionCalls--;
-    if (this.functionCalls <= 0) {
+    if (this.functionCalls < 0) {
       throw new BudgetExceededError("function_calls");
     }
   }
 
   callSensor() {
     this.sensorCalls--;
-    if (this.sensorCalls <= 0) {
+    if (this.sensorCalls < 0) {
       throw new BudgetExceededError("sensor_calls");
     }
   }
 
   memoryOp() {
     this.memoryOps--;
-    if (this.memoryOps <= 0) {
+    if (this.memoryOps < 0) {
       throw new BudgetExceededError("memory_ops");
     }
   }
 
   isExhausted() {
-    return this.instructions <= 0 || this.functionCalls <= 0 ||
-           this.sensorCalls <= 0 || this.memoryOps <= 0;
+    return this.instructions < 0 || this.functionCalls < 0 ||
+           this.sensorCalls < 0 || this.memoryOps < 0;
   }
 
   reset() {

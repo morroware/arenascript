@@ -11,6 +11,16 @@ export class VisibilityTracker {
 
   /** Update visibility and generate enemy_seen / enemy_lost events */
   update(world) {
+    // Emit enemy_lost for robots that died this tick
+    for (const robot of world.robots.values()) {
+      if (robot.alive) continue;
+      const previousSet = this.#previousVisibility.get(robot.id);
+      if (previousSet && previousSet.size > 0) {
+        // This dead robot had visibility entries — clean them up
+        this.#previousVisibility.delete(robot.id);
+      }
+    }
+
     for (const robot of world.robots.values()) {
       if (!robot.alive) continue;
 

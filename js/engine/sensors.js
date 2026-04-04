@@ -159,8 +159,11 @@ export function createSensorGateway(world) {
       case "nearest_resource": {
         let nearestDist = Infinity;
         let nearest = null;
+        // Only search within vision range (consistent with other discovery-based sensors)
+        const visionRange = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
         for (const res of world.resources.values()) {
           const d = distance(robot.position, res.position);
+          if (d > visionRange) continue;
           if (d < nearestDist) {
             nearestDist = d;
             nearest = { id: res.id, position: { x: res.position.x, y: res.position.y }, amount: res.amount };
@@ -278,7 +281,7 @@ export function createSensorGateway(world) {
           const other = world.getRobot(target);
           if (other) return distance(robot.position, other.position);
         }
-        return 999;
+        return Infinity;
       }
 
       case "line_of_sight": {
@@ -298,7 +301,7 @@ export function createSensorGateway(world) {
       case "current_tick":
         return world.currentTick;
       case "team_size":
-        return robot.squadSize ?? 1;
+        return world.getAliveRobotsByTeam(robot.teamId).length;
       case "my_index":
         return robot.squadIndex ?? 0;
       case "my_role":

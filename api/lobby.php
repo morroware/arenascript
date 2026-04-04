@@ -32,6 +32,13 @@ class LobbyManager
      */
     public function createLobby(string $hostId, string $name, string $mode = '1v1_unranked'): array
     {
+        // Sanitize lobby name (limit length, strip control chars)
+        $name = mb_substr(trim($name), 0, 100);
+        $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name);
+        if ($name === '') {
+            $name = 'Untitled Lobby';
+        }
+
         $id = 'lobby_' . (++$this->nextId);
 
         $maxPlayers = match ($mode) {
@@ -192,7 +199,7 @@ class LobbyManager
         }
 
         // Only the host can start the match
-        if ($playerId !== null && $playerId !== $lobby['host']) {
+        if ($playerId === null || $playerId !== $lobby['host']) {
             return null;
         }
 

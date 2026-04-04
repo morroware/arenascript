@@ -10,6 +10,7 @@ import {
   BURST_FIRE_DAMAGE, BURST_FIRE_RANGE, BURST_FIRE_COOLDOWN, BURST_FIRE_ENERGY_COST,
   GRENADE_DAMAGE, GRENADE_RADIUS, GRENADE_RANGE, GRENADE_COOLDOWN, GRENADE_ENERGY_COST,
   SHIELD_DURATION, SHIELD_COOLDOWN, SHIELD_ENERGY_COST, LOW_HEALTH_THRESHOLD,
+  PICKUP_DAMAGE_MULTIPLIER,
 } from "../shared/config.js";
 
 /** Resolve a combat action for a robot */
@@ -37,7 +38,7 @@ export function resolveCombat(world, robot, action) {
       const cooldown = stats?.attackCooldown ?? ATTACK_COOLDOWN;
       // Apply damage pickup effect
       if (robot.activeEffects?.some(e => e.type === "damage")) {
-        damage = Math.round(damage * 1.4); // PICKUP_DAMAGE_MULTIPLIER
+        damage = Math.round(damage * PICKUP_DAMAGE_MULTIPLIER);
       }
 
       applyDamage(world, target, damage, robot.id);
@@ -64,7 +65,7 @@ export function resolveCombat(world, robot, action) {
       const vel = scale(dir, PROJECTILE_SPEED);
       let fireAtDmg = FIRE_AT_DAMAGE;
       if (robot.activeEffects?.some(e => e.type === "damage")) {
-        fireAtDmg = Math.round(fireAtDmg * 1.4);
+        fireAtDmg = Math.round(fireAtDmg * PICKUP_DAMAGE_MULTIPLIER);
       }
       world.spawnProjectile(robot.id, { ...robot.position }, vel, fireAtDmg, PROJECTILE_TTL);
 
@@ -85,7 +86,7 @@ export function resolveCombat(world, robot, action) {
       const baseDir = normalize(sub(targetPos, robot.position));
       let burstDmg = BURST_FIRE_DAMAGE;
       if (robot.activeEffects?.some(e => e.type === "damage")) {
-        burstDmg = Math.round(burstDmg * 1.4);
+        burstDmg = Math.round(burstDmg * PICKUP_DAMAGE_MULTIPLIER);
       }
       const spread = [0, -0.12, 0.12];
       for (const s of spread) {
@@ -105,10 +106,14 @@ export function resolveCombat(world, robot, action) {
       if (distance(robot.position, targetPos) > GRENADE_RANGE) break;
       const cd = robot.cooldowns.get("attack") ?? 0;
       if (cd > 0) break;
+      let grenadeDmg = GRENADE_DAMAGE;
+      if (robot.activeEffects?.some(e => e.type === "damage")) {
+        grenadeDmg = Math.round(grenadeDmg * PICKUP_DAMAGE_MULTIPLIER);
+      }
       for (const other of world.getAliveRobots()) {
         if (other.teamId === robot.teamId) continue;
         if (distance(other.position, targetPos) <= GRENADE_RADIUS) {
-          applyDamage(world, other, GRENADE_DAMAGE, robot.id);
+          applyDamage(world, other, grenadeDmg, robot.id);
         }
       }
       // Damage destructible cover in blast radius
@@ -134,8 +139,9 @@ export function resolveCombat(world, robot, action) {
     case "shield": {
       const cd = robot.cooldowns.get("shield") ?? 0;
       if (cd > 0) break;
-      // Apply shield as a health restore capped at maxHealth
-      robot.health = Math.min(robot.maxHealth, robot.health + 20);
+      // Apply shield as a health restore capped at maxHealth (roughly 20% of base)
+      const shieldHeal = Math.round(robot.maxHealth * 0.2);
+      robot.health = Math.min(robot.maxHealth, robot.health + shieldHeal);
       robot.cooldowns.set("shield", SHIELD_COOLDOWN);
       robot.energy = Math.max(0, robot.energy - SHIELD_ENERGY_COST);
       break;
@@ -159,7 +165,8 @@ export function applyDamage(world, target, damage, sourceId) {
     data: { damage, sourceId },
   });
 
-  if (target.health <= LOW_HEALTH_THRESHOLD && target.health > 0) {
+  const healthBefore = target.health + damage;
+  if (target.health <= LOW_HEALTH_THRESHOLD && target.health > 0 && healthBefore > LOW_HEALTH_THRESHOLD) {
     world.emitEvent({
       type: "low_health",
       tick: world.currentTick,

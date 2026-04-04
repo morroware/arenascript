@@ -25,13 +25,14 @@ function getKFactor(float $rating): int
 function calculateEloChange(float $winnerRating, float $loserRating): array
 {
     $expectedWin  = expectedScore($winnerRating, $loserRating);
-    $expectedLose = expectedScore($loserRating, $winnerRating);
 
+    // Use average K-factor for both players to maintain zero-sum
     $kWinner = getKFactor($winnerRating);
     $kLoser  = getKFactor($loserRating);
+    $k = ($kWinner + $kLoser) / 2;
 
-    $winnerDelta = (int) round($kWinner * (1 - $expectedWin));
-    $loserDelta  = (int) round($kLoser * (0 - $expectedLose));
+    $winnerDelta = (int) round($k * (1 - $expectedWin));
+    $loserDelta  = -$winnerDelta; // Ensure zero-sum
 
     return [
         'winnerNew'   => (int) ($winnerRating + $winnerDelta),
@@ -68,11 +69,14 @@ function calculateEloDraw(float $ratingA, float $ratingB): array
 /** Determine rank tier from Elo rating */
 function getRankTier(int $elo): string
 {
-    if ($elo >= RANK_THRESHOLDS['champion']) return 'champion';
-    if ($elo >= RANK_THRESHOLDS['diamond'])  return 'diamond';
-    if ($elo >= RANK_THRESHOLDS['platinum']) return 'platinum';
-    if ($elo >= RANK_THRESHOLDS['gold'])     return 'gold';
-    if ($elo >= RANK_THRESHOLDS['silver'])   return 'silver';
+    // Iterate thresholds in descending order so changes to config are auto-reflected
+    $tiers = RANK_THRESHOLDS;
+    arsort($tiers);
+    foreach ($tiers as $tier => $threshold) {
+        if ($elo >= $threshold) {
+            return $tier;
+        }
+    }
     return 'bronze';
 }
 

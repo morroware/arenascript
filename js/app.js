@@ -720,7 +720,7 @@ function getMatchSeed() {
     const parsed = parseInt(val, 10);
     if (!isNaN(parsed) && parsed >= 0) return parsed;
   }
-  return Math.floor(Math.random() * 100000);
+  return Math.floor(Math.random() * 2147483647);
 }
 
 // ============================================================================
@@ -925,8 +925,9 @@ function showErrors(errors) {
   lastCompileErrors = errors;
   errorBarEl.classList.add("visible");
   errorBarEl.innerHTML = errors.map(e => {
-    const lineNum = e.line ? `<button type="button" class="error-line-num" data-line="${e.line}">Ln ${e.line}</button>` : "";
-    return `<div class="error-line-entry">${lineNum}${escapeHtml(e.message || e)}</div>`;
+    const safeLine = Number.isFinite(Number(e.line)) ? Number(e.line) : 0;
+    const lineNum = safeLine > 0 ? `<button type="button" class="error-line-num" data-line="${safeLine}">Ln ${safeLine}</button>` : "";
+    return `<div class="error-line-entry">${lineNum}${escapeHtml(e.message || String(e))}</div>`;
   }).join("");
 
   errorBarEl.querySelectorAll(".error-line-num[data-line]").forEach((el) => {
@@ -953,6 +954,10 @@ function logToConsole(message, type = "info") {
   line.className = `log-${type}`;
   line.textContent = message;
   consoleEl.appendChild(line);
+  // Cap console entries to prevent unbounded DOM growth
+  while (consoleEl.children.length > 500) {
+    consoleEl.removeChild(consoleEl.firstChild);
+  }
   consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 

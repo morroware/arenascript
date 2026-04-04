@@ -2,7 +2,7 @@
 // Replay System — Deterministic match recording and playback
 // ============================================================================
 
-import { ENGINE_VERSION } from "../shared/config.js";
+import { ENGINE_VERSION, LOW_HEALTH_THRESHOLD } from "../shared/config.js";
 
 export class ReplayWriter {
   #frames = [];
@@ -24,8 +24,10 @@ export class ReplayWriter {
       teamId: r.teamId,
       robotClass: r.class,
       position: { x: r.position.x, y: r.position.y },
+      heading: { x: r.heading.x, y: r.heading.y },
       health: r.health,
       energy: r.energy,
+      alive: r.alive,
       action: actions.get(r.id),
     }));
 
@@ -51,6 +53,10 @@ export class ReplayWriter {
       destructible: c.destructible, health: c.health,
     }));
 
+    const controlPoints = [...world.controlPoints.values()].map(cp => ({
+      id: cp.id, owner: cp.owner, captureProgress: cp.captureProgress,
+    }));
+
     const frame = {
       tick: world.currentTick,
       robots,
@@ -58,6 +64,7 @@ export class ReplayWriter {
       mines,
       pickups,
       covers,
+      controlPoints,
       events: [...events],
     };
 
@@ -140,8 +147,8 @@ export function computeBookmarks(frames) {
         }
       }
 
-      // Low health moment (first time this robot drops below 25 HP)
-      if (robot.health > 0 && robot.health < 25 && !lowHealthSeen.has(robot.id)) {
+      // Low health moment (first time this robot drops below threshold)
+      if (robot.health > 0 && robot.health < LOW_HEALTH_THRESHOLD && !lowHealthSeen.has(robot.id)) {
         lowHealthSeen.add(robot.id);
         bookmarks.lowHealthMoments.push({ frameIndex: i, robotId: robot.id });
       }
@@ -184,6 +191,7 @@ export function validateReplayDeterminism(replay1, replay2) {
       if (Math.abs(r1.position.x - r2.position.x) > 0.001) return false;
       if (Math.abs(r1.position.y - r2.position.y) > 0.001) return false;
       if (r1.health !== r2.health) return false;
+      if (r1.energy !== r2.energy) return false;
     }
   }
 
