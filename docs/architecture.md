@@ -24,74 +24,57 @@ ArenaScript is composed of four layers:
 
 ## Language Pipeline (`js/lang/`)
 
-The compiler transforms ArenaScript source code into bytecode through four stages:
+The compiler transforms ArenaScript source code into bytecode through four stages.
 
 ### 1. Lexer (`tokens.js`)
 
-Converts source text into a token stream. Handles:
-- Keywords (`robot`, `on`, `if`, `let`, `set`, `fn`, etc.)
-- Literals (numbers, strings, booleans, null)
-- Operators and punctuation
-- Comments (stripped during tokenization)
-- Newline-significant tokenization
+Converts source text into a token stream. Handles keywords, literals (numbers,
+strings, booleans, null), operators, punctuation, and comments.
 
 ### 2. Parser (`parser.js`)
 
-Recursive descent parser that builds an Abstract Syntax Tree (AST) from tokens.
+Recursive-descent parser with Pratt-style expression parsing. Produces an AST
+of `Program`, `MetaBlock`, `ConstBlock`, `SquadBlock`, `StateBlock`,
+`EventHandler`, `FunctionDecl`, statements (`Let`, `Set`, `If`, `For`,
+`Return`, `Action`, `After`, `Every`, `Expression`), and expression nodes.
 
-Key AST nodes (defined in `ast.js`):
-- `RobotDeclaration` - Top-level program node
-- `MetaBlock`, `ConstBlock`, `StateBlock` - Declarations
-- `EventHandler` - Event handler definitions (`on tick`, `on spawn`, etc.)
-- `FunctionDeclaration` - Custom function definitions
-- `IfStatement`, `ForStatement` - Control flow
-- `LetStatement`, `SetStatement` - Variable operations
-- `CommandStatement` - Robot actions (`attack`, `move_toward`, etc.)
-- `BinaryExpression`, `UnaryExpression` - Operators
-- `CallExpression`, `MemberExpression` - Function calls and property access
+Action keywords are kept in a dedicated set so the parser can distinguish
+`attack enemy` (action statement) from `attack()` (call expression).
 
 ### 3. Semantic Analyzer (`semantic.js`)
 
 Validates the AST for correctness:
-- Type checking on state variables
-- Scope resolution (constants, state, locals)
-- Valid event handler names
-- Command argument validation
-- Duplicate declaration detection
-- Produces diagnostics (errors and warnings)
+
+- Unique robot/meta/squad/const/state blocks
+- Valid class names, squad sizes and roles
+- Scope resolution for constants, state, and locals
+- Validated event handler names (`spawn`, `tick`, `damaged`, `low_health`,
+  `enemy_seen`, `enemy_lost`, `cooldown_ready`, `destroyed`, `signal_received`)
+- Validated action names and sensor names (with "did you mean" suggestions)
+- Function signatures and duplicate detection
+
+Outputs a diagnostic list of errors and warnings.
 
 ### 4. Compiler (`compiler.js`)
 
-Transforms validated AST into a compact bytecode program:
-- Generates bytecode instructions (see `runtime/opcodes.js`)
-- Builds constant pool for literals
-- Maps event handlers to bytecode entry points
-- Outputs a `CompiledProgram` object consumed by the VM
+Transforms the validated AST into a compact bytecode program:
+
+- Emits stack-based opcodes (see `runtime/opcodes.js`)
+- Builds a constant pool for literals and strings
+- Maps event handlers and user functions to bytecode entry points
+- Produces a `CompiledProgram` object consumed by the VM
 
 ### Pipeline Orchestrator (`pipeline.js`)
 
-The `compile(source)` function runs all four stages in sequence and returns:
-
-```javascript
-{
-  success: boolean,
-  program: CompiledProgram,   // if success
-  constants: Array,           // constant pool
-  diagnostics: Array,         // warnings
-  errors: Array               // error messages if failed
-}
-```
+The `compile(source)` function runs all four stages in sequence and returns
+`{ success, program, constants, diagnostics, errors }`.
 
 ### Shared Validation (`js/shared/validation.js`)
 
-Centralized validators gate match setup data before execution:
-- `validateMatchMode(mode)`
-- `validateParticipantCount(mode, count)`
-- `validateMatchConfig(config)`
-- `validateParticipant(participant)`
-- `validateMatchRequest(request)`
-
-`validateMatchConfig` enforces finite, positive arena dimensions and rejects malformed numeric inputs (including `NaN` and `Infinity`) early.
+Match setup data is validated before execution via
+`validateMatchMode`, `validateParticipantCount`, `validateMatchConfig`,
+`validateParticipant`, and `validateMatchRequest`. Arena dimensions must be
+finite and positive (NaN/Infinity rejected).
 
 ---
 
@@ -99,28 +82,24 @@ Centralized validators gate match setup data before execution:
 
 ### Opcodes (`opcodes.js`)
 
-Defines the bytecode instruction set used by the VM. Instructions are stack-based operations including:
-- Stack manipulation (push, pop, dup)
-- Arithmetic and comparison
-- Control flow (jump, jump-if-false)
-- Variable load/store
-- Function calls
-- Sensor and command dispatch
+Stack-based instruction set: stack manipulation, arithmetic, comparison,
+control flow, variable load/store, function calls, builtin/sensor dispatch,
+and action emission.
 
 ### VM (`vm.js`)
 
-Stack-based bytecode interpreter that executes compiled robot programs:
+Stack-based bytecode interpreter:
 
-- **Instruction dispatch** - Fetch-decode-execute cycle
-- **Stack machine** - Operands pushed/popped from an evaluation stack
-- **Sensor gateway** - Interface to query world state (injected by engine)
-- **Budget enforcement** - Tracks instruction count, function calls, sensor calls
-- **Event dispatch** - Jumps to bytecode entry points for event handlers
-- **Constant pool** - Lookup table for literal values and user constants
+- Fetch-decode-execute loop with instruction budget accounting
+- Operand stack and local-variable window per call frame
+- Sensor gateway injection for world queries (`CALL_BUILTIN` opcode)
+- Action intent emission (`Op.ACTION`) — builds typed intent objects
+- Event dispatch — jumps to bytecode entry points for event handlers
+- Timer scheduling for `after` / `every` blocks
 
 ### Budget System (`budget.js`)
 
-Enforces per-tick execution limits to prevent infinite loops and ensure fairness:
+Per-tick execution limits prevent infinite loops and ensure fairness:
 
 | Resource | Limit |
 |----------|------:|
@@ -129,7 +108,7 @@ Enforces per-tick execution limits to prevent infinite loops and ensure fairness
 | Sensor calls | 30 |
 | Memory operations | 200 |
 
-When a budget is exceeded, execution halts for that robot's current tick (non-fatal).
+Exceeding a budget halts that robot for the current tick only (non-fatal).
 
 ---
 
@@ -138,88 +117,163 @@ When a budget is exceeded, execution halts for that robot's current tick (non-fa
 ### World Model (`world.js`)
 
 Manages all game state:
-- Robot entities (position, health, energy, cooldowns, team, class)
-- Projectile entities (position, velocity, TTL, owner)
-- Control points (position, capture progress per team)
-- Entity ID generation
+
+- `robots` — position, heading, health, energy, cooldowns, team, class, plus
+  extended state: heat, ammo, cloak, overwatch, taunt, mines placed, active
+  pickup effects, self-destruct countdown, waypoint memory, discovery memory
+- `projectiles` — owner, position, velocity, damage, TTL
+- `controlPoints` — capture points with owner and progress
+- `covers` — static or destructible AABB obstacles
+- `healingZones` / `hazards` — passive effect zones
+- `mines` — placed proximity mines
+- `pickups` — randomly spawned power-ups
+- `depots` — **resupply depots** (refill ammo, vent heat)
+- `noiseEvents` — recent audio cues (attacks, movement, grenades)
+- `pendingSignals` — squad communications awaiting dispatch
+- `hiveMemory` — per-team shared key/value store (`hive_set` / `hive_get`)
 
 ### Tick Loop (`tick.js`)
 
-The core game loop runs a deterministic 11-phase tick:
+The core game loop runs a deterministic multi-phase tick. Each tick executes
+the following phases in fixed order:
 
 ```
-Phase 1:  Budget Reset         - Reset per-robot instruction budgets
-Phase 2:  Sensor Update        - Compute visibility and fog-of-war
-Phase 3:  Event Dispatch       - Fire pending events (spawn, damaged, low_health)
-Phase 4:  VM Execution         - Run each robot's tick handler bytecode
-Phase 5:  Action Validation    - Validate and categorize collected robot intents
-Phase 6:  Movement Resolution  - Process movement with AABB collision detection
-Phase 7:  Combat Resolution    - Resolve attacks and apply damage
-Phase 8:  Projectile Update    - Advance projectiles, check hits, expire TTL
-Phase 9:  Cooldown Update      - Decrement ability cooldowns
-Phase 10: Capture Update       - Process control point capture progress
-Phase 11: Replay Capture       - Record frame snapshot for replay system
+Phase 1    Cooldown update        - decrement all cooldowns; heat decay;
+                                    overheat recovery; cloak upkeep
+Phase 1b   Timer execution        - run any fired after/every blocks
+Phase 1c   Pickup spawn           - periodic random pickup generation
+Phase 1d   Effect expiry          - expire taunts, overwatch, pickup effects
+Phase 1e   Noise decay            - prune old noise events
+
+Phase 2-4  VM execution           - build sensor views, run tick handlers,
+                                    collect movement/combat/utility intents
+Phase 5    Movement resolution    - compute next positions
+Phase 6    Movement apply         - apply movement + resolve collisions
+Phase 7    Combat resolution      - attacks, projectile spawns, noise emit
+Phase 7b   Mine detonation        - check mine trigger radii
+Phase 7c   Pickup collection      - apply pickup effects
+Phase 8    Damage & effects       - advance projectiles, heal/hazard zones,
+                                    resupply depots, self-destruct detonation
+Phase 8b   Discovery memory       - update each robot's map-feature memory
+Phase 8c   Signal dispatch        - deliver pending squad signals
+Phase 8d   Control point update   - process capture progress
+
+Phase 9    Event dispatch         - fire damaged/low_health/destroyed/
+                                    cooldown_ready/signal_received handlers
+Phase 10   Replay capture         - record frame snapshot
+Phase 11   Win condition check    - elimination / mutual destruction /
+                                    sudden-death timeout resolution
 ```
 
-The `runMatch(setup)` function runs ticks until a win condition is met or max ticks reached.
+`runMatch(setup)` runs ticks until a win condition is met or the absolute
+tick cap (standard time + sudden death) is reached.
 
 **Win conditions:**
-- All robots on one team are eliminated
-- A team reaches capture threshold on control points
-- Max ticks reached (draw, or winner by remaining HP)
+
+- Elimination — only one team has alive robots remaining
+- Mutual destruction — no teams have alive robots
+- Timeout / sudden death — after `maxTicks` every alive robot takes
+  1 damage per tick until a team is eliminated or the hard cap is hit.
+  Ties are resolved by alive count → total HP → damage dealt → control
+  points owned.
 
 ### Movement (`movement.js`)
 
-- Resolves movement intents into position changes
-- AABB collision detection against arena boundaries
-- Robot-to-robot collision resolution
-- Respects class-specific move speeds
+Resolves movement intents into velocity updates, applies position changes,
+handles robot-vs-robot and robot-vs-cover collisions via AABB tests, and
+respects class-specific move speeds and arena bounds.
 
 ### Combat (`combat.js`)
 
-- Validates attack targets (range, cooldown, energy)
-- Applies damage based on class stats
-- Handles projectile creation for `fire_at` commands
-- Updates projectile positions and checks for hits
-- Manages cooldown timers for all abilities
+Resolves all combat actions and manages the resource economy:
 
-### Line of Sight (`los.js`)
+- **Weapons**: `attack` (melee), `fire_at` (standard ranged), `fire_light`
+  (fast/weak/long-range), `fire_heavy` (slow/strong), `burst_fire` (3-shot
+  spread), `grenade` (AoE), `zap` (short-range energy discharge with
+  self-damage), `shield` (self-heal), `vent_heat` (trades combat slot for
+  aggressive cooling)
+- **Ammo**: every projectile weapon consumes ammo. Melee `attack` and `zap`
+  are ammo-free. Running out of ammo disables projectile weapons until the
+  robot visits a resupply depot.
+- **Heat**: every combat action generates heat. At `HEAT_MAX` (100) the robot
+  becomes **overheated** and cannot fire until heat drops below
+  `HEAT_RECOVERY_THRESHOLD` (60). Each class has a different
+  `heatDissipation` multiplier.
+- **Projectile simulation**: `updateProjectiles` advances positions each
+  tick, checks LOS-blocking cover hits, checks enemy-robot hits (friendly
+  fire disabled), and applies damage + TTL decay.
+- **Cloak state**: taking damage immediately breaks cloak; any offensive
+  action also breaks cloak via `breakCloak()`.
+- **Cooldown update**: decrements all per-action cooldowns, regenerates
+  energy by 1/tick, applies heat decay (with optional extra cooling from
+  `vent_heat`), toggles overheat recovery, and handles cloak energy drain
+  and expiry.
 
-Computes visibility between entities for fog-of-war mechanics. Robots can only perceive entities within their LOS range (150 units).
+### Line of Sight & Visibility (`los.js`)
+
+- Ray-vs-AABB LOS tests against all cover objects
+- Per-class vision range with pickup / overwatch bonuses
+- Cloaked enemies are filtered out beyond `CLOAK_BREAK_DISTANCE` (4 units)
+  from `getVisibleEnemies`, so `nearest_enemy`, `visible_enemies`, and
+  `scan` all respect cloak
 
 ### Sensors (`sensors.js`)
 
-Gateway layer between robot VMs and the world. Provides:
-- `nearest_enemy()` / `nearest_ally()` - Nearest visible entity queries
-- `nearest_control_point()` - Closest capture point
-- `health()` / `energy()` - Self status queries
-- `can_attack()` - Attack feasibility check
-- `visible_enemies()` / `visible_allies()` - List queries
+Read-only gateway between robot VMs and the world (with a handful of
+intentional side-effectful writes for `hive_set`). Provides 60+ sensors:
 
-All sensor results are filtered through line-of-sight and include tactical/perception helpers used by newer language features (signals, mines, pickups, team role context).
+- Self: `health`, `energy`, `heat`, `ammo`, `overheated`, `is_cloaked`,
+  `self_destruct_armed`, `kills`, `time_alive`, etc.
+- Perception: `nearest_enemy`, `visible_enemies`, `scan`, `scan_enemies`,
+  `last_seen_enemy`, `has_recent_enemy_contact`, `enemy_heading`,
+  `is_enemy_facing_me`
+- Allies & squad: `nearest_ally`, `visible_allies`, `ally_health`,
+  `team_size`, `my_index`, `my_role`
+- Map features (discovery-based): `nearest_cover`, `nearest_heal_zone`,
+  `nearest_hazard`, `nearest_control_point`, `nearest_depot`, `is_on_depot`
+- Hive memory: `hive_get`, `hive_set`, `hive_has`
+- Audio/memory: `nearest_sound`, `recall_position`, `discovered_count`
+- Geometry: `distance_to`, `angle_to`, `is_facing`, `line_of_sight`,
+  `wall_ahead`, `arena_width`, `arena_height`, `spawn_position`
+- Utility: `random`, `current_tick`, `has_effect`
 
 ### Actions (`actions.js`)
 
-Collects and validates robot action intents:
-- Each robot can submit one action per tick
-- Actions are validated against game rules (range, cooldown, energy)
-- Invalid actions are silently dropped
-- Categorized into movement, combat, and ability actions
+Collects, validates, and categorizes robot action intents:
+
+- Movement slot: `move_*`, `turn_*`, `strafe_*`, `stop`, `retreat`
+- Combat slot: `attack`, `fire_at`, `fire_light`, `fire_heavy`, `burst_fire`,
+  `grenade`, `zap`, `shield`, `vent_heat`, `use_ability`
+- Utility slot: `place_mine`, `send_signal`, `mark_position`, `taunt`,
+  `overwatch`, `cloak`, `self_destruct`
+
+At most one of each category executes per tick. Validation checks
+cooldowns, energy, ammo, and overheat state; invalid intents are silently
+dropped.
 
 ### Events (`events.js`)
 
-Event system that triggers robot event handlers:
-- `spawn` - Fires once when robot enters the arena
-- `damaged` - Fires when robot takes damage (includes event data)
-- `low_health` - Fires when health drops below 25 HP
-- Visibility tracking for enter/exit line-of-sight events
+Generates reactive events dispatched to `on` handlers:
+
+- `spawn`, `tick` — lifecycle
+- `damaged` — robot took damage (with source + amount)
+- `low_health` — HP crossed `LOW_HEALTH_THRESHOLD` from above
+- `destroyed` — HP reached 0
+- `cooldown_ready` — a tracked cooldown reached 0
+- `enemy_seen` / `enemy_lost` — visibility transitions
+- `signal_received` — ally broadcast delivered
 
 ### Replay (`replay.js`)
 
-Captures match state each tick for replay:
-- Robot positions, health, and team IDs per frame
-- Compact frame format for efficient storage
-- Reader/writer pattern for serialization
+Captures full deterministic match state:
+
+- Per-frame: every robot's position, heading, HP, energy, heat, ammo,
+  overheat/cloak/self-destruct flags, plus projectiles, mines, pickups,
+  covers (destructible HP), control points, events, and decision traces
+- Arena layout (once): covers, control points, healing zones, hazards,
+  resupply depots
+- `validateReplayDeterminism` can verify two replays produced by the same
+  inputs are bit-identical for position/health/energy
 
 ---
 
@@ -229,36 +283,47 @@ Captures match state each tick for replay:
 
 JavaScript implementations of competitive features that can run in the browser:
 
-- **matchmaking.js** - Elo-based queue pairing with expanding search range
-- **ranked.js** - Elo rating calculations and rank tier assignment
-- **tournament.js** - Bracket generation (single elimination, round robin, Swiss)
-- **match-runner.js** - Match orchestration wrapping the tick engine
-- **lobby.js** - Multiplayer lobby management (1v1, 2v2, FFA)
+- **matchmaking.js** — Elo-based queue pairing with expanding search range
+- **ranked.js** — Elo rating calculations and rank tier assignment
+- **tournament.js** — Bracket generation (single elimination, round robin, Swiss)
+- **match-runner.js** — Match orchestration wrapping the tick engine
+- **lobby.js** — Multiplayer lobby management (1v1, 2v2, FFA)
 
 ### Server-Side (`api/`)
 
-PHP backend endpoints that mirror the client-side logic for authoritative server execution:
+PHP backend endpoints that mirror the client-side logic for authoritative
+server execution:
 
-- **config.php** - Shared game balance constants
-- **matchmaking.php** - Server-authoritative queue and pairing
-- **ranked.php** - Elo calculations with K-factor adjustment
-- **tournament.php** - Bracket generation with seeded PRNG for reproducibility
-- **match-runner.php** - Server-side match execution
-- **lobby.php** - Lobby lifecycle management
+- **config.php** — Shared game balance constants
+- **matchmaking.php** — Server-authoritative queue and pairing
+- **ranked.php** — Elo calculations with K-factor adjustment
+- **tournament.php** — Bracket generation with seeded PRNG for reproducibility
+- **match-runner.php** — Server-side match execution
+- **lobby.php** — Lobby lifecycle management
 
 ---
 
 ## Determinism
 
-The engine is fully deterministic. Given the same inputs (robot programs, configuration, seed), every match produces identical results. This is achieved through:
+The engine is fully deterministic. Given the same compiled programs,
+configuration, and seed, every match produces identical frames. This is
+achieved through:
 
-1. **Seeded PRNG** (`shared/prng.js`) - All randomness uses a deterministic seed
-2. **Fixed-order processing** - Robots are processed in consistent order each tick
-3. **No floating-point ambiguity** - Careful use of integer math where possible
-4. **Replay verification** - Replay system can verify determinism by re-running matches
+1. **Seeded PRNG** (`shared/prng.js`) — all randomness uses a deterministic seed
+2. **Fixed-order processing** — robots, projectiles, and zones are iterated
+   in consistent order every tick
+3. **Careful numeric handling** — vector math is monomorphic and avoids
+   non-deterministic ordering
+4. **Replay verification** — the replay system can re-run a match and
+   bit-compare frames via `validateReplayDeterminism`
 
 ---
 
 ## Configuration (`shared/config.js`)
 
-All game balance constants are centralized in a single configuration file. This includes arena dimensions, tick rate, robot stats, combat values, budget limits, and ranked system parameters. The PHP backend mirrors these constants in `api/config.php`.
+All game balance constants live in a single file: arena dimensions, tick
+rate, robot class stats (including `maxAmmo` and `heatDissipation`), combat
+values, heat/ammo costs per weapon, resupply depot rates, cloak parameters,
+zap and self-destruct constants, pickup effects, signal ranges, budget
+limits, and ranked system parameters. The PHP backend mirrors the subset it
+needs in `api/config.php`.

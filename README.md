@@ -6,14 +6,20 @@ A deterministic robot arena combat engine with a custom domain-specific language
 
 - **Custom DSL** - ArenaScript language with lexer, parser, semantic analyzer, and bytecode compiler
 - **Sandboxed VM** - Stack-based bytecode interpreter with budget metering (prevents infinite loops)
-- **Deterministic Engine** - 11-phase tick-based simulation with seeded PRNG for reproducible matches
-- **Centralized Validation** - Mode/config/participant request validation with strict numeric guards (`NaN`/`Infinity` rejected for arena dimensions)
-- **Dynamic Arenas** - Seeded randomized cover layouts + healing zones for replay-safe map variety
+- **Deterministic Engine** - Multi-phase tick-based simulation with seeded PRNG for reproducible matches
+- **Resource Economy** - Heat + ammo + energy + HP create real strategic tradeoffs every tick
+- **Resupply Depots** - Contested neutral objectives that refill ammo and vent heat
+- **Information Warfare** - Cloaking with break-on-damage/attack + directional scan sensors
+- **Hive Memory** - Shared team key/value store for real squad coordination
+- **Advanced Combat** - Light/heavy projectile variants, short-range zap, armed self-destruct
+- **Centralized Validation** - Mode/config/participant request validation (NaN/Infinity rejected)
+- **Dynamic Arenas** - Seeded randomized cover layouts, healing zones, hazards, and depots
 - **Live Visualization** - Canvas-based arena rendering with replay animation
-- **4 Robot Classes** - Brawler, Ranger, Tank, and Support with distinct stats
+- **4 Robot Classes** - Brawler, Ranger, Tank, and Support with distinct stats, heat, and ammo profiles
+- **Squad System** - 1-5 bots per team with role assignment
 - **Ranked System** - Elo-based matchmaking and rating tiers (Bronze through Champion)
 - **Tournaments** - Single elimination, round robin, and Swiss format support
-- **Replay System** - Full match replay capture and playback
+- **Replay System** - Full match replay capture including heat/ammo/cloak state
 - **PHP Backend** - API endpoints for matchmaking, lobbies, rankings, and tournaments
 
 ## Tech Stack
@@ -153,39 +159,60 @@ on damaged(event) {
 
 | Feature | Description |
 |---------|-------------|
-| **Types** | `string`, `number`, `boolean`, `id`, `id?` (nullable), `null` |
-| **Declarations** | `let` for local variables, `set` for state mutations |
-| **Control Flow** | `if`/`else`, `for`...`in` loops, `return` |
+| **Types** | `number`, `boolean`, `string`, `id`, `vector`, `position`, `list<T>`, nullable `T?` |
+| **Declarations** | `let` for locals, `set` for state mutations, `const` for constants, `state` block for persistent vars |
+| **Control Flow** | `if`/`else if`/`else`, `for`...`in` loops, `return`, `after`/`every` timer blocks |
 | **Operators** | `+`, `-`, `*`, `/`, `%`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `and`, `or`, `not` |
-| **Events** | `on spawn`, `on tick`, `on damaged`, `on low_health` |
-| **Commands** | `attack`, `fire_at`, `burst_fire`, `grenade`, `move_toward`, `move_to`, `move_forward`, `turn_left`, `retreat`, `shield` |
-| **Sensors** | `nearest_enemy()`, `scan()`, `scan_enemies()`, `enemy_visible()`, `wall_ahead()`, `nearest_heal_zone()`, `random()`, `last_seen_enemy()`, `health()`, `energy()`, `can_attack()` |
-| **Functions** | `fn name(params) { ... }` for custom functions |
+| **Events** | `on spawn`, `on tick`, `on damaged`, `on low_health`, `on destroyed`, `on enemy_seen`, `on enemy_lost`, `on cooldown_ready`, `on signal_received` |
+| **Movement** | `move_to`, `move_toward`, `move_forward`, `move_backward`, `turn_left`, `turn_right`, `strafe_left`, `strafe_right`, `stop`, `retreat` |
+| **Combat** | `attack`, `fire_at`, `fire_light`, `fire_heavy`, `burst_fire`, `grenade`, `zap`, `shield`, `vent_heat` |
+| **Utility** | `cloak`, `self_destruct`, `place_mine`, `send_signal`, `mark_position`, `taunt`, `overwatch`, `capture`, `ping` |
+| **Perception sensors** | `nearest_enemy`, `visible_enemies`, `scan`, `scan_enemies`, `last_seen_enemy`, `enemy_heading`, `is_enemy_facing_me`, `nearest_ally`, `visible_allies`, `nearest_sound` |
+| **Resource sensors** | `health`, `energy`, `heat`, `ammo`, `heat_percent`, `ammo_percent`, `overheated` |
+| **State sensors** | `is_cloaked`, `cloak_remaining`, `self_destruct_armed`, `self_destruct_remaining`, `is_taunted`, `is_in_overwatch`, `has_effect` |
+| **Map sensors** | `nearest_depot`, `is_on_depot`, `nearest_control_point`, `nearest_cover`, `nearest_heal_zone`, `nearest_hazard`, `nearest_mine`, `nearest_pickup` |
+| **Team memory** | `hive_get(key)`, `hive_set(key, value)`, `hive_has(key)` — shared per-team key/value store |
+| **Functions** | `fn name(params) { ... }` for custom helper functions |
+
+See [docs/language-reference.md](docs/language-reference.md) for the full sensor and command reference with examples.
 
 ### Robot Classes
 
-| Class | HP | Energy | Speed | Damage | Range | Cooldown | Playstyle |
-|-------|---:|-------:|------:|-------:|------:|---------:|-----------|
-| **Brawler** | 120 | 80 | 2.2 | 14 | 3.5 | 4 ticks | Aggressive melee |
-| **Ranger** | 80 | 100 | 2.0 | 10 | 8.0 | 6 ticks | Ranged kiting |
-| **Tank** | 150 | 60 | 1.5 | 8 | 4.0 | 5 ticks | Defensive holding |
-| **Support** | 90 | 120 | 1.8 | 6 | 6.0 | 7 ticks | Team support |
+| Class | HP | Energy | Speed | Damage | Range | Ammo | Heat Dissipation | Playstyle |
+|-------|---:|-------:|------:|-------:|------:|-----:|-----------------:|-----------|
+| **Brawler** | 120 | 80 | 2.2 | 14 | 3.5 | 50 | 2.2x (fastest) | Aggressive melee, rarely overheats |
+| **Ranger** | 80 | 100 | 2.0 | 10 | 8.0 | 100 | 1.0x (baseline) | Ranged kiting, largest ammo pool |
+| **Tank** | 150 | 60 | 1.5 | 8 | 4.0 | 80 | 0.7x (slowest) | Defensive holding, overheats fast |
+| **Support** | 90 | 120 | 1.8 | 6 | 6.0 | 70 | 1.5x | Team support, good heat management |
+
+### Resource Economy
+
+Beyond HP and energy, every combat action feeds into a **heat + ammo** resource model:
+
+- **Heat** builds from firing and ability use. At 100 the robot is *overheated* and cannot fire until it cools below 60.
+- **Ammo** is finite per-spawn and only refills at **resupply depots** placed neutrally in the middle of each arena.
+- **Melee attack** and **zap** cost no ammo — close-quarters options when ranged runs dry.
+- **vent_heat** trades the combat slot this tick for aggressive cooling.
+
+This creates a constant "fight-now vs. retreat-to-resupply vs. conserve-and-cool" decision loop that runs on top of normal positioning and target selection.
 
 ## Engine Architecture
 
-The simulation runs a deterministic 11-phase tick loop:
+The simulation runs a deterministic multi-phase tick loop. Each tick processes, in order:
 
-1. **Budget Reset** - Reset per-robot instruction budgets
-2. **Sensor Update** - Compute visibility and perception data
-3. **Event Dispatch** - Fire pending events (spawn, damaged, low_health)
-4. **VM Execution** - Run each robot's bytecode (tick handler)
-5. **Action Validation** - Validate and categorize robot intents
-6. **Movement Resolution** - Process movement with collision detection
-7. **Combat Resolution** - Resolve attacks and apply damage
-8. **Projectile Update** - Advance projectile positions and TTL
-9. **Cooldown Update** - Decrement ability cooldowns
-10. **Capture Update** - Process control point capture progress
-11. **Replay Capture** - Record frame for replay system
+1. **Cooldown + heat update** — decrement cooldowns, decay heat, handle overheat recovery, upkeep cloak
+2. **Timer execution** — fire any elapsed `after` / `every` blocks
+3. **Pickup spawn + effect expiry + noise decay** — passive world tick
+4. **VM execution** — run each robot's `on tick` handler and collect intents
+5. **Movement resolution** — apply velocity, resolve collisions
+6. **Combat resolution** — attacks, projectile spawns, noise emission
+7. **Mine detonation + pickup collection**
+8. **Damage & effects** — advance projectiles, apply heal/hazard zones, apply resupply depots, resolve armed self-destructs
+9. **Discovery + signal dispatch + control point capture**
+10. **Event dispatch** — fire `damaged` / `low_health` / `destroyed` / etc. handlers
+11. **Replay capture + win condition check** (with sudden-death timeout resolution)
+
+See [docs/architecture.md](docs/architecture.md) for full details on each phase.
 
 ### Key Constants
 
@@ -193,10 +220,10 @@ The simulation runs a deterministic 11-phase tick loop:
 |---------|-------|
 | Arena Size | 140 x 140 units |
 | Tick Rate | 30 ticks/sec |
-| Max Match Duration | 3000 ticks (100 seconds) |
+| Max Match Duration | 3000 ticks (100 seconds) + up to 900 ticks sudden death |
 | CPU Budget | 1000 instructions/tick/robot |
-| Base Health | 100 HP |
 | LOS Range | 150 units |
+| Heat Cap | 100 (recovery threshold 60) |
 
 ## Ranked System
 
