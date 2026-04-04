@@ -2,6 +2,7 @@
 // Matchmaking — Elo-based queue pairing
 // ============================================================================
 import { ARENA_WIDTH, ARENA_HEIGHT, MAX_TICKS, TICK_RATE } from "../shared/config.js";
+import { validateParticipant } from "../shared/validation.js";
 const ELO_RANGE_BASE = 100;
 const ELO_RANGE_EXPANSION_PER_SEC = 10;
 const MAX_ELO_RANGE = 500;
@@ -11,8 +12,14 @@ export class MatchmakingQueue {
     constructor(ratingStore) {
         this.ratingStore = ratingStore;
     }
-    /** Add a player to the matchmaking queue */
+    /** Add a player to the matchmaking queue. Returns {ok, errors?}. */
     enqueue(playerId, program, constants, mode = "1v1_ranked") {
+        // Validate before mutating queue state so malformed requests can't
+        // DoS the matchmaker or reach the engine later with garbage programs.
+        const result = validateParticipant({ program, constants, playerId, teamId: 0 });
+        if (!result.valid) {
+            return { ok: false, errors: result.errors };
+        }
         // Remove any existing entry for this player
         this.queue = this.queue.filter(e => e.playerId !== playerId);
         const rating = this.ratingStore.getOrCreate(playerId);
@@ -24,6 +31,7 @@ export class MatchmakingQueue {
             enqueuedAt: Date.now(),
             mode,
         });
+        return { ok: true };
     }
     /** Remove a player from the queue */
     dequeue(playerId) {

@@ -72,7 +72,9 @@ export function createSensorGateway(world) {
       }
 
       case "damage_percent":
-        return Math.round(((robot.maxHealth - robot.health) / robot.maxHealth) * 100);
+        return (robot.maxHealth ?? 0) <= 0
+          ? 0
+          : Math.round(((robot.maxHealth - robot.health) / robot.maxHealth) * 100);
 
       case "wall_ahead": {
         const lookahead = Math.max(0, Number(args[0] ?? 3));
@@ -450,7 +452,9 @@ export function createSensorGateway(world) {
 
       // --- New Perception Sensors ---
       case "health_percent":
-        return Math.round((robot.health / robot.maxHealth) * 100);
+        return (robot.maxHealth ?? 0) <= 0
+          ? 0
+          : Math.round((robot.health / robot.maxHealth) * 100);
 
       case "angle_to": {
         const target = args[0];

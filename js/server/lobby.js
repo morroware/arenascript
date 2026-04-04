@@ -2,18 +2,38 @@
 // Lobby System — Multiplayer match orchestration
 // ============================================================================
 import { ARENA_WIDTH, ARENA_HEIGHT, MAX_TICKS, TICK_RATE } from "../shared/config.js";
+/** Generate a 128-bit unguessable lobby ID. Sequential IDs let attackers
+ *  brute-force a lobby's URL and join/spoof the match mid-flight. */
+function generateLobbyId() {
+    // Prefer WebCrypto when available (browser + Node >= 19 globalThis.crypto).
+    const c = (typeof globalThis !== "undefined" && globalThis.crypto) ? globalThis.crypto : null;
+    if (c && typeof c.getRandomValues === "function") {
+        const bytes = new Uint8Array(16);
+        c.getRandomValues(bytes);
+        let hex = "";
+        for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+        return `lobby_${hex}`;
+    }
+    // Fallback: two Math.random ints (not cryptographic, but unguessable
+    // within a reasonable attack budget on a PoC deployment).
+    const a = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0");
+    const b = Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, "0");
+    return `lobby_${a}${b}`;
+}
+
 export class LobbyManager {
     lobbies = new Map();
     matchRunner;
     matchmaking;
-    nextId = 0;
     constructor(matchRunner, matchmaking) {
         this.matchRunner = matchRunner;
         this.matchmaking = matchmaking;
     }
     /** Create a new lobby */
     createLobby(hostId, name, mode = "1v1_unranked") {
-        const id = `lobby_${++this.nextId}`;
+        // Retry on the astronomically unlikely collision.
+        let id = generateLobbyId();
+        while (this.lobbies.has(id)) id = generateLobbyId();
         const maxPlayers = mode === "2v2" ? 4 : mode === "ffa" ? 8 : 2;
         const lobby = {
             id,

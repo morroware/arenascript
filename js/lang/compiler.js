@@ -187,9 +187,11 @@ export class Compiler {
 
     // Compile event handlers (can now reference any function)
     const eventHandlers = new Map();
+    const eventHandlerHasParam = new Set();
     for (const handler of program.handlers) {
       const offset = builder.code.length;
       eventHandlers.set(handler.event, offset);
+      if (handler.param) eventHandlerHasParam.add(handler.event);
       this.#compileEventHandler(handler, builder);
       builder.emit(Op.RETURN);
     }
@@ -220,6 +222,7 @@ export class Compiler {
         eventHandlers,
         functions,
         localWindowSize: chunk.localCount,
+        eventHandlerHasParam,
         squad: {
           size: squadSize,
           roles: squadRoles,
@@ -498,6 +501,17 @@ export class Compiler {
       }
 
       case "CallExpr": {
+        // Method-call syntax (e.g. `obj.method()`) is not supported — the
+        // parser produces a MemberExpr callee that we cannot resolve to a
+        // function offset or built-in name. Fail loudly instead of silently
+        // generating broken bytecode.
+        if (typeof expr.callee !== "string") {
+          throw new CompileError(
+            `Method call syntax is not supported. Use a free function (e.g. 'fn_name(arg)') instead.`,
+            expr.span?.line ?? 0,
+            expr.span?.column ?? 0,
+          );
+        }
         // Push arguments
         for (const arg of expr.args) {
           this.#compileExpression(arg, b);
