@@ -190,7 +190,7 @@ Validation rejects invalid mode/count combinations and malformed config values i
 
 ### Replay Data
 
-Each replay frame contains:
+Each replay frame contains the full simulation state for that tick:
 
 ```javascript
 {
@@ -198,12 +198,43 @@ Each replay frame contains:
   robots: [
     {
       id: string,
-      position: { x: number, y: number },
-      health: number,
       teamId: number,
+      robotClass: string,
+      position: { x: number, y: number },
+      heading:  { x: number, y: number },
+      health: number,
+      energy: number,
+      heat: number,
+      ammo: number,
+      overheated: boolean,
+      cloaked: boolean,
+      selfDestructing: boolean,
+      alive: boolean,
+      action: ActionIntent | undefined,
     }
-  ]
+  ],
+  projectiles: [ { id, position } ],
+  mines: [ { id, teamId, position } ],
+  pickups: [ { id, type, position } ],
+  covers: [ { id, x, y, w, h, destructible, health } ],
+  controlPoints: [ { id, owner, captureProgress } ],
+  events: Event[],
+  traces: DecisionTrace[],  // optional — one per robot per tick
 }
+```
+
+The replay's metadata also includes the procedural arena layout (covers,
+control points, heal zones, hazards, and **depots**) captured once at
+match start:
+
+```javascript
+replay.metadata.arenaLayout = {
+  covers:         [...],
+  controlPoints:  [...],
+  healingZones:   [...],
+  hazards:        [...],
+  depots:         [ { x, y, radius } ],
+};
 ```
 
 ### Configuration Constants
