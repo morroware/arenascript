@@ -174,7 +174,7 @@ export function createSensorGateway(world) {
       case "hive_has": {
         const key = args[0];
         if (typeof key !== "string") return false;
-        return world.hiveGet(robot.teamId, key) !== null;
+        return world.hiveHas(robot.teamId, key);
       }
 
       case "position":
@@ -349,28 +349,34 @@ export function createSensorGateway(world) {
 
       case "distance_to": {
         const target = args[0];
-        if (!target) return 999;
-        if ("x" in target && "y" in target) {
-          return distance(robot.position, target);
-        }
-        if ("position" in target) {
-          return distance(robot.position, target.position);
-        }
-        // It might be an entity ID
+        if (target == null) return 999;
+        // Entity ID (string)
         if (typeof target === "string") {
           const other = world.getRobot(target);
           if (other) return distance(robot.position, other.position);
+          return 999;
         }
-        return Infinity;
+        if (typeof target !== "object") return 999;
+        if ("x" in target && "y" in target) {
+          return distance(robot.position, target);
+        }
+        if ("position" in target && target.position &&
+            typeof target.position === "object" &&
+            "x" in target.position && "y" in target.position) {
+          return distance(robot.position, target.position);
+        }
+        return 999;
       }
 
       case "line_of_sight": {
         const target = args[0];
-        if (!target) return false;
+        if (target == null || typeof target !== "object") return false;
         let targetPos;
         if ("x" in target && "y" in target) {
           targetPos = target;
-        } else if ("position" in target) {
+        } else if ("position" in target && target.position &&
+                   typeof target.position === "object" &&
+                   "x" in target.position && "y" in target.position) {
           targetPos = target.position;
         } else {
           return false;
@@ -419,14 +425,14 @@ export function createSensorGateway(world) {
 
       case "can_attack": {
         const target = args[0];
-        if (!target) return false;
+        if (target == null || typeof target !== "object") return false;
         const cd = robot.cooldowns.get("attack") ?? 0;
         if (cd > 0) return false;
         const stats = CLASS_STATS[robot.class];
         const range = stats?.attackRange ?? ATTACK_RANGE;
         let targetPos;
         let targetId = null;
-        if ("position" in target) {
+        if ("position" in target && target.position && typeof target.position === "object") {
           targetPos = target.position;
           targetId = target.id ?? null;
         } else if ("x" in target && "y" in target) {
@@ -448,10 +454,12 @@ export function createSensorGateway(world) {
 
       case "angle_to": {
         const target = args[0];
-        if (!target) return 0;
+        if (target == null || typeof target !== "object") return 0;
         let tx, ty;
         if ("x" in target && "y" in target) { tx = target.x; ty = target.y; }
-        else if ("position" in target) { tx = target.position.x; ty = target.position.y; }
+        else if ("position" in target && target.position && typeof target.position === "object") {
+          tx = target.position.x; ty = target.position.y;
+        }
         else return 0;
         const dx = tx - robot.position.x;
         const dy = ty - robot.position.y;
@@ -466,10 +474,12 @@ export function createSensorGateway(world) {
       case "is_facing": {
         const target = args[0];
         const tolerance = args[1] ?? 30;
-        if (!target) return false;
+        if (target == null || typeof target !== "object") return false;
         let tx, ty;
         if ("x" in target && "y" in target) { tx = target.x; ty = target.y; }
-        else if ("position" in target) { tx = target.position.x; ty = target.position.y; }
+        else if ("position" in target && target.position && typeof target.position === "object") {
+          tx = target.position.x; ty = target.position.y;
+        }
         else return false;
         const dx = tx - robot.position.x;
         const dy = ty - robot.position.y;

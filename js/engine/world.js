@@ -200,6 +200,12 @@ export class World {
     return teamMap.has(key) ? teamMap.get(key) : null;
   }
 
+  hiveHas(teamId, key) {
+    const teamMap = this.hiveMemory.get(teamId);
+    if (!teamMap) return false;
+    return teamMap.has(key);
+  }
+
   addPickup(position, type) {
     const id = generateId("pickup");
     const pickup = { id, position: { ...position }, type, collected: false };
