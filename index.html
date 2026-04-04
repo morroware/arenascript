@@ -7,12 +7,24 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>&#x1F916;</text></svg>">
 </head>
-<body>
+<body data-view="builder">
 
   <!-- Top Bar -->
   <header class="top-bar">
     <div class="top-bar-left">
       <h1>ARENA<span>SCRIPT</span></h1>
+      <nav class="view-tabs" role="tablist" aria-label="Main views">
+        <button class="view-tab active" data-view="builder" role="tab" aria-selected="true">
+          <span class="tab-icon">&#9998;</span> Builder
+        </button>
+        <button class="view-tab" data-view="arena" role="tab" aria-selected="false">
+          <span class="tab-icon">&#9876;</span> Arena
+        </button>
+        <button class="view-tab" data-view="library" role="tab" aria-selected="false">
+          <span class="tab-icon">&#128218;</span> My Bots
+          <span class="tab-count" id="tab-count-library">0</span>
+        </button>
+      </nav>
     </div>
     <div class="top-bar-actions">
       <span class="shortcut-hint">Ctrl+Enter Compile</span>
@@ -24,186 +36,277 @@
   <!-- App Layout -->
   <div class="app-layout">
 
-    <!-- Sidebar: Bot Presets -->
+    <!-- Sidebar: contextual to active view -->
     <aside class="sidebar">
-      <div class="sidebar-header">Bots</div>
 
-      <button class="bot-preset active" data-bot="bruiser" title="Bruiser — Aggressive Brawler">
-        <div class="bot-class-icon brawler">B</div>
-        <div class="bot-preset-info">
-          <span class="bot-preset-name">Bruiser</span>
-          <span class="bot-preset-class">Brawler</span>
+      <!-- Builder sidebar content: presets + user bots -->
+      <div class="sidebar-panel" data-sidebar="builder">
+        <div class="sidebar-header">Presets</div>
+
+        <button class="bot-preset active" data-bot="bruiser" title="Bruiser — Aggressive Brawler">
+          <div class="bot-class-icon brawler">B</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Bruiser</span>
+            <span class="bot-preset-class">Brawler</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="kiter" title="Kiter — Ranged Ranger">
+          <div class="bot-class-icon ranger">K</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Kiter</span>
+            <span class="bot-preset-class">Ranger</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="fortress" title="Fortress — Defensive Tank">
+          <div class="bot-class-icon tank">F</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Fortress</span>
+            <span class="bot-preset-class">Tank</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="healer" title="Healer — Support">
+          <div class="bot-class-icon support">H</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Healer</span>
+            <span class="bot-preset-class">Support</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="flanker" title="Flanker — Ranger">
+          <div class="bot-class-icon ranger">L</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Flanker</span>
+            <span class="bot-preset-class">Ranger</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="sentinel" title="Sentinel — Tank">
+          <div class="bot-class-icon tank">S</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Sentinel</span>
+            <span class="bot-preset-class">Tank</span>
+          </div>
+        </button>
+
+        <div class="sidebar-header sidebar-header-user">
+          <span>My Bots</span>
+          <button id="btn-sidebar-new-bot" class="sidebar-mini-btn" title="New empty bot in editor">+ New</button>
         </div>
-      </button>
-
-      <button class="bot-preset" data-bot="kiter" title="Kiter — Ranged Ranger">
-        <div class="bot-class-icon ranger">K</div>
-        <div class="bot-preset-info">
-          <span class="bot-preset-name">Kiter</span>
-          <span class="bot-preset-class">Ranger</span>
+        <div id="sidebar-user-bots" class="sidebar-user-bots">
+          <div class="sidebar-empty-hint">No saved bots yet. Write code in the editor and click <b>Save to Library</b>, or upload a <code>.arena</code> file from the My Bots tab.</div>
         </div>
-      </button>
-
-      <button class="bot-preset" data-bot="fortress" title="Fortress — Defensive Tank">
-        <div class="bot-class-icon tank">F</div>
-        <div class="bot-preset-info">
-          <span class="bot-preset-name">Fortress</span>
-          <span class="bot-preset-class">Tank</span>
-        </div>
-      </button>
-
-      <button class="bot-preset" data-bot="healer" title="Healer — Support">
-        <div class="bot-class-icon support">H</div>
-        <div class="bot-preset-info">
-          <span class="bot-preset-name">Healer</span>
-          <span class="bot-preset-class">Support</span>
-        </div>
-      </button>
-
-      <button class="bot-preset" data-bot="flanker" title="Flanker — Ranger">
-        <div class="bot-class-icon ranger">L</div>
-        <div class="bot-preset-info">
-          <span class="bot-preset-name">Flanker</span>
-          <span class="bot-preset-class">Ranger</span>
-        </div>
-      </button>
-
-      <button class="bot-preset" data-bot="sentinel" title="Sentinel — Tank">
-        <div class="bot-class-icon tank">S</div>
-        <div class="bot-preset-info">
-          <span class="bot-preset-name">Sentinel</span>
-          <span class="bot-preset-class">Tank</span>
-        </div>
-      </button>
-
-      <!-- Opponent Selector -->
-      <div class="sidebar-section">
-        <label for="match-mode">Match Mode</label>
-        <select id="match-mode" class="opponent-select">
-          <option value="duel_1v1" selected>Duel 1v1</option>
-          <option value="squad_2v2">Squad 2v2</option>
-        </select>
       </div>
 
-      <div class="sidebar-section">
-        <label for="opponent-select">Opponent</label>
-        <select id="opponent-select" class="opponent-select">
-          <option value="bruiser">Bruiser</option>
-          <option value="kiter" selected>Kiter</option>
-          <option value="fortress">Fortress</option>
-          <option value="healer">Healer</option>
-          <option value="flanker">Flanker</option>
-          <option value="sentinel">Sentinel</option>
-        </select>
+      <!-- Arena sidebar content: match setup -->
+      <div class="sidebar-panel" data-sidebar="arena" hidden>
+        <div class="sidebar-header">Match Setup</div>
+
+        <div class="sidebar-section">
+          <label for="match-mode">Match Mode</label>
+          <select id="match-mode" class="opponent-select">
+            <option value="duel_1v1" selected>Duel 1v1</option>
+            <option value="squad_2v2">Squad 2v2</option>
+          </select>
+        </div>
+
+        <div class="sidebar-section">
+          <label for="opponent-select">Opponent</label>
+          <select id="opponent-select" class="opponent-select"></select>
+        </div>
+
+        <div class="sidebar-section">
+          <label for="seed-input">Seed (blank = random)</label>
+          <input id="seed-input" type="number" class="opponent-select" placeholder="Random" min="0" max="2147483646">
+        </div>
+
+        <div class="sidebar-section">
+          <button id="btn-arena-run" class="btn btn-run btn-block">Run Match</button>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="sidebar-section">
+          <label for="team-preset-select">Team Simulation</label>
+          <select id="team-preset-select" class="opponent-select">
+            <option value="skirmish_pair">Skirmish Pair</option>
+            <option value="pressure_line">Pressure Line</option>
+          </select>
+          <button id="btn-run-team-sim" class="btn btn-run team-sim-btn">Run Team Sim</button>
+        </div>
+
+        <div class="sidebar-section">
+          <button id="btn-open-team-builder" class="btn btn-team-builder-open">Team Builder</button>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="sidebar-section sidebar-loaded-bot">
+          <label>Your Bot</label>
+          <div id="arena-loaded-bot" class="arena-loaded-bot">None loaded</div>
+          <div class="sidebar-help">Write &amp; compile in Builder, or pick a bot in My Bots.</div>
+        </div>
       </div>
 
-      <div class="sidebar-section">
-        <label for="seed-input">Seed (blank = random)</label>
-        <input id="seed-input" type="number" class="opponent-select" placeholder="Random" min="0" max="2147483646">
-      </div>
-
-      <div class="sidebar-section">
-        <label for="team-preset-select">Team Simulation</label>
-        <select id="team-preset-select" class="opponent-select">
-          <option value="skirmish_pair">Skirmish Pair</option>
-          <option value="pressure_line">Pressure Line</option>
-        </select>
-        <button id="btn-run-team-sim" class="btn btn-run team-sim-btn">Run Team Sim</button>
-      </div>
-
-      <!-- Team Builder Trigger -->
-      <div class="sidebar-section">
-        <button id="btn-open-team-builder" class="btn btn-team-builder-open">Team Builder</button>
+      <!-- Library sidebar content: filters -->
+      <div class="sidebar-panel" data-sidebar="library" hidden>
+        <div class="sidebar-header">Filter</div>
+        <div class="sidebar-section">
+          <label for="library-filter-class">Class</label>
+          <select id="library-filter-class" class="opponent-select">
+            <option value="">All classes</option>
+            <option value="brawler">Brawler</option>
+            <option value="ranger">Ranger</option>
+            <option value="tank">Tank</option>
+            <option value="support">Support</option>
+          </select>
+        </div>
+        <div class="sidebar-section">
+          <label for="library-search">Search</label>
+          <input id="library-search" type="text" class="opponent-select" placeholder="Name or author">
+        </div>
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-section">
+          <button id="btn-library-upload" class="btn btn-run btn-block">Upload .arena</button>
+          <input id="library-file-input" type="file" accept=".arena,.txt,text/plain" multiple hidden>
+        </div>
+        <div class="sidebar-help" style="padding: 0 14px;">
+          Uploaded bots are validated by the compiler and stored in your browser (localStorage).
+        </div>
       </div>
     </aside>
 
     <!-- Main Content -->
     <main class="main-content">
 
-      <!-- Editor Toolbar -->
-      <div class="editor-toolbar">
-        <div class="file-tab"><span class="dot"></span>robot.arena</div>
-        <div id="diagnostic-summary" class="diagnostic-summary" aria-live="polite">No diagnostics</div>
-        <div class="spacer"></div>
-        <button id="btn-compile" class="btn btn-compile">Compile</button>
-        <button id="btn-run" class="btn btn-run" disabled>Run Match</button>
-        <button id="btn-compile-run" class="btn btn-compile-run">Compile &amp; Run</button>
-      </div>
+      <!-- ============ BUILDER + ARENA SHARED WORKSPACE ============ -->
+      <!-- The editor/arena/console lives here and is visible in Builder view.
+           In Arena view the editor collapses and the canvas expands. -->
+      <div class="view-content view-content-workspace" data-view-content="workspace">
 
-      <!-- Workspace: Editor + Arena -->
-      <div class="workspace">
+        <!-- Editor Toolbar (Builder view) -->
+        <div class="editor-toolbar">
+          <div class="file-tab"><span class="dot"></span><span id="editor-file-name">robot.arena</span></div>
+          <div id="diagnostic-summary" class="diagnostic-summary" aria-live="polite">No diagnostics</div>
+          <div class="spacer"></div>
+          <button id="btn-save-library" class="btn btn-save" title="Validate and save current editor code to your bot library">&#128190; Save to Library</button>
+          <button id="btn-compile" class="btn btn-compile">Compile</button>
+          <button id="btn-run" class="btn btn-run" disabled>Run Match</button>
+          <button id="btn-compile-run" class="btn btn-compile-run">Compile &amp; Run</button>
+        </div>
 
-        <!-- Code Editor -->
-        <div class="editor-pane">
-          <div class="editor-container">
-            <div class="line-numbers" id="line-numbers" aria-hidden="true"></div>
-            <div class="editor-code-area">
-              <pre class="highlight-layer" id="highlight-layer" aria-hidden="true"></pre>
-              <textarea id="code-editor" class="code-input" spellcheck="false"
-                placeholder="Write your ArenaScript robot program here..."
-                autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+        <!-- Workspace: Editor + Arena -->
+        <div class="workspace">
+
+          <!-- Code Editor -->
+          <div class="editor-pane">
+            <div class="editor-container">
+              <div class="line-numbers" id="line-numbers" aria-hidden="true"></div>
+              <div class="editor-code-area">
+                <pre class="highlight-layer" id="highlight-layer" aria-hidden="true"></pre>
+                <textarea id="code-editor" class="code-input" spellcheck="false"
+                  placeholder="Write your ArenaScript robot program here..."
+                  autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+              </div>
+            </div>
+            <!-- Error Bar -->
+            <div id="error-bar" class="error-bar"></div>
+          </div>
+
+          <!-- Resize Handle -->
+          <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
+
+          <!-- Arena Pane -->
+          <div class="arena-pane">
+            <div class="arena-header">
+              <span class="label">Arena</span>
+              <span id="arena-status">Idle</span>
+              <div class="arena-toggles">
+                <button id="btn-toggle-traces" class="arena-toggle-btn" title="Toggle decision traces">Traces</button>
+                <button id="btn-toggle-fullpage" class="arena-toggle-btn" title="Toggle full-page battle view">Expand</button>
+              </div>
+            </div>
+            <div class="arena-canvas-wrap">
+              <canvas id="arena-canvas" width="400" height="400"></canvas>
+            </div>
+
+            <!-- Replay Controls -->
+            <div class="replay-controls" id="replay-controls">
+              <button id="btn-replay-toggle" class="replay-btn" title="Play / Pause">&#9654;</button>
+              <button id="btn-replay-step-back" class="replay-btn step-btn" title="Step Back">&#9664;&#9664;</button>
+              <button id="btn-replay-step" class="replay-btn step-btn" title="Step Forward">&#9654;&#9654;</button>
+              <input id="replay-scrubber" class="replay-scrubber" type="range" min="0" max="100" value="0">
+              <span id="replay-tick-label" class="replay-tick-label">0 / 0</span>
+              <button id="btn-bookmark-damage" class="replay-btn bookmark-btn" title="Jump to first damage">1st Dmg</button>
+              <button id="btn-bookmark-kill" class="replay-btn bookmark-btn" title="Jump to first kill">1st Kill</button>
+              <label class="speed-label">
+                Speed
+                <select id="replay-speed" class="replay-speed-select">
+                  <option value="0.25">0.25x</option>
+                  <option value="0.5">0.5x</option>
+                  <option value="1" selected>1x</option>
+                  <option value="2">2x</option>
+                  <option value="4">4x</option>
+                  <option value="8">8x</option>
+                </select>
+              </label>
+            </div>
+
+            <!-- Match Results -->
+            <div id="match-results" class="match-results">
+              <div class="match-results-title">Match Results</div>
+              <div id="results-content" class="result-grid"></div>
+              <div id="results-robot-detail" class="result-robot-detail"></div>
             </div>
           </div>
-          <!-- Error Bar -->
-          <div id="error-bar" class="error-bar"></div>
+
         </div>
 
-        <!-- Resize Handle -->
-        <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
-
-        <!-- Arena Pane -->
-        <div class="arena-pane">
-          <div class="arena-header">
-            <span class="label">Arena</span>
-            <span id="arena-status">Idle</span>
-            <div class="arena-toggles">
-              <button id="btn-toggle-traces" class="arena-toggle-btn" title="Toggle decision traces">Traces</button>
-              <button id="btn-toggle-fullpage" class="arena-toggle-btn" title="Toggle full-page battle view">Expand</button>
-            </div>
+        <!-- Console -->
+        <div class="console-pane">
+          <div class="console-header">
+            <span class="label">Console</span>
+            <button id="btn-clear" class="console-clear-btn">Clear</button>
           </div>
-          <div class="arena-canvas-wrap">
-            <canvas id="arena-canvas" width="400" height="400"></canvas>
-          </div>
-
-          <!-- Replay Controls -->
-          <div class="replay-controls" id="replay-controls">
-            <button id="btn-replay-toggle" class="replay-btn" title="Play / Pause">&#9654;</button>
-            <button id="btn-replay-step-back" class="replay-btn step-btn" title="Step Back">&#9664;&#9664;</button>
-            <button id="btn-replay-step" class="replay-btn step-btn" title="Step Forward">&#9654;&#9654;</button>
-            <input id="replay-scrubber" class="replay-scrubber" type="range" min="0" max="100" value="0">
-            <span id="replay-tick-label" class="replay-tick-label">0 / 0</span>
-            <button id="btn-bookmark-damage" class="replay-btn bookmark-btn" title="Jump to first damage">1st Dmg</button>
-            <button id="btn-bookmark-kill" class="replay-btn bookmark-btn" title="Jump to first kill">1st Kill</button>
-            <label class="speed-label">
-              Speed
-              <select id="replay-speed" class="replay-speed-select">
-                <option value="0.25">0.25x</option>
-                <option value="0.5">0.5x</option>
-                <option value="1" selected>1x</option>
-                <option value="2">2x</option>
-                <option value="4">4x</option>
-                <option value="8">8x</option>
-              </select>
-            </label>
-          </div>
-
-          <!-- Match Results -->
-          <div id="match-results" class="match-results">
-            <div class="match-results-title">Match Results</div>
-            <div id="results-content" class="result-grid"></div>
-            <div id="results-robot-detail" class="result-robot-detail"></div>
-          </div>
+          <div id="console-output" class="console-output"></div>
         </div>
 
       </div>
 
-      <!-- Console -->
-      <div class="console-pane">
-        <div class="console-header">
-          <span class="label">Console</span>
-          <button id="btn-clear" class="console-clear-btn">Clear</button>
+      <!-- ============ MY BOTS (LIBRARY) VIEW ============ -->
+      <div class="view-content view-content-library" data-view-content="library" hidden>
+        <div class="library-header">
+          <div class="library-title">
+            <h2>My Bots</h2>
+            <span class="library-subtitle">Uploaded and saved bots are validated by the compiler and stored locally in your browser.</span>
+          </div>
+          <div class="library-actions">
+            <button id="btn-library-upload-top" class="btn btn-compile">&#11014; Upload .arena files</button>
+            <button id="btn-library-new" class="btn btn-run">+ New in Editor</button>
+          </div>
         </div>
-        <div id="console-output" class="console-output"></div>
+
+        <!-- Drop zone -->
+        <div id="library-dropzone" class="library-dropzone">
+          <div class="dropzone-icon">&#128228;</div>
+          <div class="dropzone-text">
+            <strong>Drop <code>.arena</code> files here</strong>
+            <span>or click Upload above — each bot is validated through the full compiler pipeline before being saved.</span>
+          </div>
+        </div>
+
+        <!-- Upload results -->
+        <div id="library-upload-results" class="library-upload-results" hidden></div>
+
+        <!-- Bot grid -->
+        <div id="library-grid" class="library-grid"></div>
+        <div id="library-empty" class="library-empty">
+          <div class="library-empty-icon">&#129302;</div>
+          <h3>No bots in your library yet</h3>
+          <p>Write a bot in the <b>Builder</b> and click <b>Save to Library</b>, or drop a <code>.arena</code> file above.</p>
+        </div>
       </div>
 
     </main>
@@ -242,6 +345,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Toast / notification slot -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <script type="module" src="js/app.js"></script>
 </body>
