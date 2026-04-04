@@ -431,18 +431,22 @@ function resolveTargetId(world, action) {
 }
 
 function resolveTargetPosition(world, action) {
-  if (!action.target) return null;
-  if (typeof action.target === "object" && "x" in action.target && "y" in action.target) {
-    return action.target;
+  const target = action.target;
+  if (target == null) return null;
+  if (typeof target === "string") {
+    const robot = world.getRobot(target);
+    if (robot) return robot.position;
+    return null;
+  }
+  if (typeof target !== "object") return null;
+  if ("x" in target && "y" in target) {
+    return target;
   }
   // Sensor objects often include { id, position, ... }
-  if (typeof action.target === "object" && "position" in action.target &&
-      action.target.position && "x" in action.target.position && "y" in action.target.position) {
-    return action.target.position;
-  }
-  if (typeof action.target === "string") {
-    const robot = world.getRobot(action.target);
-    if (robot) return robot.position;
+  if ("position" in target && target.position &&
+      typeof target.position === "object" &&
+      "x" in target.position && "y" in target.position) {
+    return target.position;
   }
   return null;
 }

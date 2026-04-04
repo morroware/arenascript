@@ -227,26 +227,30 @@ function isInsideCover(world, position) {
 
 /** Resolve target from action intent — could be a position, entity ID, or entity object */
 function resolveTargetPosition(world, action) {
-  if (!action.target) return null;
+  const target = action.target;
+  if (target == null) return null;
 
-  if (typeof action.target === "string") {
+  if (typeof target === "string") {
     // Entity ID
-    const entity = world.getRobot(action.target);
+    const entity = world.getRobot(target);
     if (entity) return entity.position;
-    const cp = world.controlPoints.get(action.target);
+    const cp = world.controlPoints.get(target);
     if (cp) return cp.position;
     return null;
   }
 
+  if (typeof target !== "object") return null;
+
   // Direct position
-  if ("x" in action.target && "y" in action.target) {
-    return action.target;
+  if ("x" in target && "y" in target) {
+    return target;
   }
 
   // Sensor objects often include { id, position, ... }.
-  if ("position" in action.target && action.target.position &&
-    "x" in action.target.position && "y" in action.target.position) {
-    return action.target.position;
+  if ("position" in target && target.position &&
+      typeof target.position === "object" &&
+      "x" in target.position && "y" in target.position) {
+    return target.position;
   }
 
   return null;
