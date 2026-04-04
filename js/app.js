@@ -10,6 +10,7 @@ import {
 } from "./shared/config.js";
 import { Telemetry } from "./shared/telemetry.js";
 import { computeBookmarks } from "./engine/replay.js";
+import * as BotLibrary from "./bot-library.js";
 
 const telemetry = Telemetry.instance();
 
@@ -702,6 +703,9 @@ const ctx = canvasEl.getContext("2d");
 
 let compiledPlayer = null;
 let currentPreset = "bruiser";
+let currentEditorBotName = "Bruiser";
+let currentEditorUserBotId = null;   // if the editor currently holds a user library bot, its id
+let currentView = "builder";         // "builder" | "arena" | "library"
 let lastMatchResult = null;
 let lastCompileErrors = [];
 let showDecisionTraces = false;
@@ -1005,6 +1009,7 @@ function doCompile() {
       telemetry.increment(Telemetry.COMPILE_SUCCESS);
       compiledPlayer = { program: result.program, constants: result.constants };
       btnRun.disabled = false;
+      if (typeof updateArenaLoadedBotLabel === "function") updateArenaLoadedBotLabel();
 
       logToConsole(`Compiled OK  |  ${result.program.robotClass}  |  ${result.program.bytecode.length} bytes  |  events: ${[...result.program.eventHandlers.keys()].join(", ")}`, "success");
 
@@ -1071,7 +1076,7 @@ function doRunMatch() {
   }
 
   const oppKey = opponentSelect.value;
-  const oppPreset = BOT_PRESETS[oppKey];
+  const oppPreset = getBotEntry(oppKey);
   if (!oppPreset) {
     logToConsole("Invalid opponent selection.", "error");
     return;
@@ -1910,13 +1915,20 @@ function stepReplayBack() {
 // ============================================================================
 
 function loadPreset(key) {
-  const preset = BOT_PRESETS[key];
+  const preset = getBotEntry(key);
   if (!preset) return;
   editorEl.value = preset.source;
   currentPreset = key;
+  currentEditorBotName = preset.name;
+  currentEditorUserBotId = key.startsWith("user_") ? key : null;
 
   presetButtons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.bot === key);
+  });
+
+  // Also highlight user bot sidebar entries
+  document.querySelectorAll(".sidebar-user-bot").forEach((el) => {
+    el.classList.toggle("active", el.dataset.bot === key);
   });
 
   compiledPlayer = null;
@@ -1924,6 +1936,8 @@ function loadPreset(key) {
   clearErrors();
   updateHighlighting();
   updateLineNumbers();
+  updateEditorFileName();
+  updateArenaLoadedBotLabel();
 }
 
 // ============================================================================
@@ -2049,23 +2063,29 @@ const BOT_ICONS = {
   healer: "H", flanker: "L", sentinel: "S",
 };
 
+function botIconLetter(key) {
+  if (BOT_ICONS[key]) return BOT_ICONS[key];
+  const entry = getBotEntry(key);
+  if (!entry) return "?";
+  // For user bots: use first letter of name, uppercased
+  return (entry.name?.charAt(0) || "U").toUpperCase();
+}
+
 function tbGetBotClass(key) {
-  return BOT_PRESETS[key]?.class ?? "brawler";
+  return getBotEntry(key)?.class ?? "brawler";
 }
 
 function tbCreateBotCard(team, botKey) {
-  const preset = BOT_PRESETS[botKey];
+  const preset = getBotEntry(botKey);
   const cls = preset?.class ?? "brawler";
   const card = document.createElement("div");
   card.className = "tb-bot-card";
   card.dataset.team = team;
 
-  const options = Object.entries(BOT_PRESETS)
-    .map(([k, p]) => `<option value="${k}"${k === botKey ? " selected" : ""}>${p.name}</option>`)
-    .join("");
+  const options = buildBotSelectOptions(botKey);
 
   card.innerHTML = `
-    <div class="tb-card-icon ${cls}">${BOT_ICONS[botKey] ?? "?"}</div>
+    <div class="tb-card-icon ${cls}">${botIconLetter(botKey)}</div>
     <div class="tb-card-body">
       <select class="tb-card-select">${options}</select>
       <span class="tb-card-class">${cls}</span>
@@ -2079,7 +2099,7 @@ function tbCreateBotCard(team, botKey) {
   select.addEventListener("change", () => {
     const newCls = tbGetBotClass(select.value);
     icon.className = `tb-card-icon ${newCls}`;
-    icon.textContent = BOT_ICONS[select.value] ?? "?";
+    icon.textContent = botIconLetter(select.value);
     classLabel.textContent = newCls;
   });
 
@@ -2158,7 +2178,7 @@ function tbRunBattle() {
     const team = [];
     for (let i = 0; i < cards.length; i++) {
       const key = cards[i].querySelector(".tb-card-select")?.value;
-      const preset = BOT_PRESETS[key];
+      const preset = getBotEntry(key);
       if (!preset) { logToConsole(`Unknown bot: ${key}`, "error"); return null; }
       try {
         const compiled = compile(preset.source);
@@ -2279,10 +2299,499 @@ btnToggleTraces?.addEventListener("click", toggleDecisionTraces);
 btnToggleFullpage?.addEventListener("click", toggleFullPageBattle);
 
 // ============================================================================
+// Bot Entry Helper (unified access: preset OR user library)
+// ============================================================================
+
+/**
+ * Look up a bot by key. Returns a normalized { name, class, source } object,
+ * or null if no match. Keys prefixed with "user_" resolve against the bot
+ * library; anything else falls back to BOT_PRESETS.
+ */
+function getBotEntry(key) {
+  if (!key) return null;
+  if (typeof key === "string" && key.startsWith("user_")) {
+    const bot = BotLibrary.getById(key);
+    if (!bot) return null;
+    return { name: bot.name, class: bot.class, source: bot.source, isUser: true, id: bot.id };
+  }
+  const preset = BOT_PRESETS[key];
+  if (!preset) return null;
+  return { name: preset.name, class: preset.class, source: preset.source, isUser: false };
+}
+
+/** Build <option> markup for every available bot, marking `selectedKey` as selected. */
+function buildBotSelectOptions(selectedKey) {
+  const groups = [];
+  const presetOpts = Object.entries(BOT_PRESETS)
+    .map(([k, p]) => `<option value="${k}"${k === selectedKey ? " selected" : ""}>${escapeHtml(p.name)}</option>`)
+    .join("");
+  groups.push(`<optgroup label="Presets">${presetOpts}</optgroup>`);
+
+  const userBots = BotLibrary.getAll();
+  if (userBots.length > 0) {
+    const userOpts = userBots
+      .map((b) => `<option value="${b.id}"${b.id === selectedKey ? " selected" : ""}>${escapeHtml(b.name)} (${b.class})</option>`)
+      .join("");
+    groups.push(`<optgroup label="My Bots">${userOpts}</optgroup>`);
+  }
+  return groups.join("");
+}
+
+// ============================================================================
+// Toast notifications
+// ============================================================================
+
+const toastContainer = document.getElementById("toast-container");
+
+function toast(message, type = "info", timeout = 3500) {
+  if (!toastContainer) return;
+  const el = document.createElement("div");
+  el.className = `toast toast-${type}`;
+  el.textContent = message;
+  toastContainer.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("visible"));
+  setTimeout(() => {
+    el.classList.remove("visible");
+    setTimeout(() => el.remove(), 250);
+  }, timeout);
+}
+
+// ============================================================================
+// View Switching (Builder / Arena / Library)
+// ============================================================================
+
+function setView(name) {
+  if (name !== "builder" && name !== "arena" && name !== "library") return;
+  currentView = name;
+  document.body.dataset.view = name;
+
+  // Top nav tabs
+  document.querySelectorAll(".view-tab").forEach((btn) => {
+    const active = btn.dataset.view === name;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+
+  // Sidebar panels
+  document.querySelectorAll(".sidebar-panel").forEach((panel) => {
+    panel.hidden = panel.dataset.sidebar !== name;
+  });
+
+  // Main view content — library is a separate area; builder+arena share workspace
+  const workspace = document.querySelector('[data-view-content="workspace"]');
+  const libraryView = document.querySelector('[data-view-content="library"]');
+  if (workspace) workspace.hidden = name === "library";
+  if (libraryView) libraryView.hidden = name !== "library";
+
+  if (name === "library") {
+    renderLibrary();
+  } else if (name === "arena") {
+    // Resize canvas to fill the arena pane since editor collapses
+    requestAnimationFrame(resizeArenaCanvasForCurrentView);
+  } else {
+    // Builder: reset canvas to compact size
+    canvasEl.width = 400;
+    canvasEl.height = 400;
+    if (replayData && replayData[replayFrameIndex]) {
+      drawFrame(replayData[replayFrameIndex], replayLabels);
+    } else {
+      drawIdle();
+    }
+  }
+
+  updateArenaLoadedBotLabel();
+}
+
+function resizeArenaCanvasForCurrentView() {
+  const wrap = document.querySelector(".arena-canvas-wrap");
+  if (!wrap) return;
+  const w = Math.max(400, wrap.clientWidth - 20);
+  const h = Math.max(400, wrap.clientHeight - 20);
+  canvasEl.width = w;
+  canvasEl.height = h;
+  if (replayData && replayData[replayFrameIndex]) {
+    drawFrame(replayData[replayFrameIndex], replayLabels);
+  } else {
+    drawIdle();
+  }
+}
+
+document.querySelectorAll(".view-tab").forEach((btn) => {
+  btn.addEventListener("click", () => setView(btn.dataset.view));
+});
+
+window.addEventListener("resize", () => {
+  if (currentView === "arena") resizeArenaCanvasForCurrentView();
+});
+
+// ============================================================================
+// Editor header / Arena loaded-bot label
+// ============================================================================
+
+const editorFileNameEl = document.getElementById("editor-file-name");
+const arenaLoadedBotEl = document.getElementById("arena-loaded-bot");
+
+function updateEditorFileName() {
+  if (!editorFileNameEl) return;
+  const base = (currentEditorBotName || "robot").replace(/\s+/g, "_").toLowerCase();
+  editorFileNameEl.textContent = `${base}.arena${currentEditorUserBotId ? " (library)" : ""}`;
+}
+
+function updateArenaLoadedBotLabel() {
+  if (!arenaLoadedBotEl) return;
+  if (compiledPlayer) {
+    arenaLoadedBotEl.textContent = `${currentEditorBotName || "Unnamed"} (compiled)`;
+    arenaLoadedBotEl.classList.add("ok");
+  } else {
+    arenaLoadedBotEl.textContent = `${currentEditorBotName || "Unnamed"} (not compiled)`;
+    arenaLoadedBotEl.classList.remove("ok");
+  }
+}
+
+// ============================================================================
+// Opponent select — dynamic, includes user bots
+// ============================================================================
+
+function refreshOpponentSelect() {
+  if (!opponentSelect) return;
+  const prev = opponentSelect.value || "kiter";
+  opponentSelect.innerHTML = buildBotSelectOptions(prev);
+  // If previous value is no longer valid, fall back to kiter
+  if (!getBotEntry(opponentSelect.value)) {
+    opponentSelect.value = "kiter";
+  }
+}
+
+// ============================================================================
+// Save-to-Library button
+// ============================================================================
+
+const btnSaveLibrary = document.getElementById("btn-save-library");
+
+btnSaveLibrary?.addEventListener("click", () => {
+  const source = editorEl.value;
+  if (!source.trim()) {
+    toast("Editor is empty.", "warn");
+    return;
+  }
+
+  // If this editor already represents a library bot, update it in place.
+  if (currentEditorUserBotId) {
+    const r = BotLibrary.updateBot(currentEditorUserBotId, source);
+    if (r.ok) {
+      currentEditorBotName = r.bot.name;
+      updateEditorFileName();
+      toast(`Updated "${r.bot.name}" in library.`, "success");
+      logToConsole(`Library: updated "${r.bot.name}".`, "success");
+    } else {
+      toast(`Validation failed: ${r.errors[0]}`, "error", 6000);
+      logToConsole(`Library save failed: ${r.errors.join("; ")}`, "error");
+    }
+    return;
+  }
+
+  const r = BotLibrary.addBot(source);
+  if (r.ok) {
+    currentEditorUserBotId = r.bot.id;
+    currentEditorBotName = r.bot.name;
+    currentPreset = r.bot.id;
+    updateEditorFileName();
+    toast(`Saved "${r.bot.name}" to library.`, "success");
+    logToConsole(`Library: saved "${r.bot.name}" (${r.bot.class}).`, "success");
+    if (r.warnings?.length) {
+      logToConsole(`Warnings: ${r.warnings.join("; ")}`, "warn");
+    }
+  } else {
+    toast(`Validation failed: ${r.errors[0]}`, "error", 6000);
+    logToConsole(`Library save failed: ${r.errors.join("; ")}`, "error");
+  }
+});
+
+// ============================================================================
+// Library View — render user-bot grid & upload handling
+// ============================================================================
+
+const libraryGridEl = document.getElementById("library-grid");
+const libraryEmptyEl = document.getElementById("library-empty");
+const libraryDropzoneEl = document.getElementById("library-dropzone");
+const libraryFileInput = document.getElementById("library-file-input");
+const libraryUploadResultsEl = document.getElementById("library-upload-results");
+const librarySearchEl = document.getElementById("library-search");
+const libraryFilterClassEl = document.getElementById("library-filter-class");
+const tabCountLibraryEl = document.getElementById("tab-count-library");
+const sidebarUserBotsEl = document.getElementById("sidebar-user-bots");
+
+function formatDate(ts) {
+  try {
+    return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  } catch { return ""; }
+}
+
+function filterLibrary(bots) {
+  const q = (librarySearchEl?.value || "").trim().toLowerCase();
+  const cls = libraryFilterClassEl?.value || "";
+  return bots.filter((b) => {
+    if (cls && b.class !== cls) return false;
+    if (q) {
+      const hay = `${b.name} ${b.author ?? ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function classIconLetter(cls) {
+  return { brawler: "B", ranger: "R", tank: "T", support: "S" }[cls] ?? "?";
+}
+
+function renderLibrary() {
+  if (!libraryGridEl) return;
+  const all = BotLibrary.getAll();
+  const bots = filterLibrary(all);
+
+  libraryGridEl.innerHTML = "";
+
+  if (all.length === 0) {
+    libraryEmptyEl.hidden = false;
+    libraryGridEl.hidden = true;
+    return;
+  }
+  libraryEmptyEl.hidden = true;
+  libraryGridEl.hidden = false;
+
+  if (bots.length === 0) {
+    libraryGridEl.innerHTML = `<div class="library-no-match">No bots match the current filter.</div>`;
+    return;
+  }
+
+  for (const bot of bots) {
+    const card = document.createElement("div");
+    card.className = "bot-card";
+    card.dataset.id = bot.id;
+    card.innerHTML = `
+      <div class="bot-card-header">
+        <div class="bot-class-icon ${bot.class}">${classIconLetter(bot.class)}</div>
+        <div class="bot-card-title">
+          <div class="bot-card-name" title="${escapeHtml(bot.name)}">${escapeHtml(bot.name)}</div>
+          <div class="bot-card-meta">${bot.class}${bot.author ? " • " + escapeHtml(bot.author) : ""}</div>
+        </div>
+      </div>
+      <div class="bot-card-source"><code>${escapeHtml(bot.source.split("\n").slice(0, 5).join("\n"))}</code></div>
+      <div class="bot-card-footer">
+        <span class="bot-card-date">${formatDate(bot.updatedAt || bot.createdAt)}</span>
+        <div class="bot-card-actions">
+          <button class="bc-btn" data-act="edit"   title="Load in Builder">Edit</button>
+          <button class="bc-btn" data-act="battle" title="Use as your bot in Arena">Battle</button>
+          <button class="bc-btn" data-act="opponent" title="Set as opponent">Opp</button>
+          <button class="bc-btn" data-act="export" title="Download .arena">Export</button>
+          <button class="bc-btn bc-btn-danger" data-act="delete" title="Delete">&times;</button>
+        </div>
+      </div>`;
+
+    card.querySelector('[data-act="edit"]').addEventListener("click", () => {
+      loadPreset(bot.id);
+      setView("builder");
+      toast(`Loaded "${bot.name}" into editor.`, "info");
+    });
+    card.querySelector('[data-act="battle"]').addEventListener("click", () => {
+      loadPreset(bot.id);
+      if (doCompile()) {
+        setView("arena");
+        toast(`"${bot.name}" compiled. Ready to battle.`, "success");
+      }
+    });
+    card.querySelector('[data-act="opponent"]').addEventListener("click", () => {
+      refreshOpponentSelect();
+      opponentSelect.value = bot.id;
+      setView("arena");
+      toast(`"${bot.name}" set as opponent.`, "info");
+    });
+    card.querySelector('[data-act="export"]').addEventListener("click", () => {
+      BotLibrary.exportBot(bot.id);
+    });
+    card.querySelector('[data-act="delete"]').addEventListener("click", () => {
+      if (confirm(`Delete "${bot.name}"? This cannot be undone.`)) {
+        BotLibrary.deleteBot(bot.id);
+        toast(`Deleted "${bot.name}".`, "info");
+      }
+    });
+
+    libraryGridEl.appendChild(card);
+  }
+}
+
+function renderSidebarUserBots() {
+  if (!sidebarUserBotsEl) return;
+  const bots = BotLibrary.getAll();
+  if (tabCountLibraryEl) tabCountLibraryEl.textContent = String(bots.length);
+
+  if (bots.length === 0) {
+    sidebarUserBotsEl.innerHTML = `<div class="sidebar-empty-hint">No saved bots yet. Write code in the editor and click <b>Save to Library</b>, or upload a <code>.arena</code> file from the My Bots tab.</div>`;
+    return;
+  }
+
+  sidebarUserBotsEl.innerHTML = "";
+  for (const bot of bots) {
+    const el = document.createElement("button");
+    el.className = "bot-preset sidebar-user-bot";
+    if (bot.id === currentPreset) el.classList.add("active");
+    el.dataset.bot = bot.id;
+    el.title = `${bot.name} — ${bot.class}`;
+    el.innerHTML = `
+      <div class="bot-class-icon ${bot.class}">${classIconLetter(bot.class)}</div>
+      <div class="bot-preset-info">
+        <span class="bot-preset-name">${escapeHtml(bot.name)}</span>
+        <span class="bot-preset-class">${bot.class}</span>
+      </div>`;
+    el.addEventListener("click", () => loadPreset(bot.id));
+    sidebarUserBotsEl.appendChild(el);
+  }
+}
+
+async function handleFileUpload(fileList) {
+  const files = Array.from(fileList || []);
+  if (files.length === 0) return;
+
+  libraryUploadResultsEl.hidden = false;
+  libraryUploadResultsEl.innerHTML = `<div class="upload-status">Validating ${files.length} file${files.length > 1 ? "s" : ""}…</div>`;
+
+  const results = await BotLibrary.importFiles(files);
+
+  const okCount = results.filter((r) => r.ok).length;
+  const failCount = results.length - okCount;
+
+  const parts = [
+    `<div class="upload-summary">`,
+    `<span class="upload-ok">${okCount} saved</span>`,
+    failCount ? `<span class="upload-fail">${failCount} rejected</span>` : "",
+    `<button class="upload-dismiss" id="btn-dismiss-upload">Dismiss</button>`,
+    `</div>`,
+  ];
+
+  for (const r of results) {
+    if (r.ok) {
+      parts.push(`<div class="upload-row ok"><b>&#10004; ${escapeHtml(r.file)}</b> → "${escapeHtml(r.bot.name)}" (${r.bot.class})</div>`);
+    } else {
+      parts.push(`<div class="upload-row fail"><b>&#10008; ${escapeHtml(r.file)}</b><div class="upload-errors">${r.errors.map(escapeHtml).join("<br>")}</div></div>`);
+    }
+  }
+
+  libraryUploadResultsEl.innerHTML = parts.join("");
+  document.getElementById("btn-dismiss-upload")?.addEventListener("click", () => {
+    libraryUploadResultsEl.hidden = true;
+    libraryUploadResultsEl.innerHTML = "";
+  });
+
+  if (okCount > 0) {
+    toast(`Imported ${okCount} bot${okCount > 1 ? "s" : ""}.`, "success");
+  }
+  if (failCount > 0 && okCount === 0) {
+    toast(`${failCount} file${failCount > 1 ? "s" : ""} failed validation.`, "error", 5000);
+  }
+}
+
+// Upload buttons
+document.getElementById("btn-library-upload")?.addEventListener("click", () => libraryFileInput?.click());
+document.getElementById("btn-library-upload-top")?.addEventListener("click", () => libraryFileInput?.click());
+libraryFileInput?.addEventListener("change", (e) => {
+  handleFileUpload(e.target.files);
+  e.target.value = ""; // allow re-uploading the same file
+});
+
+// New empty bot (builder)
+function newEmptyBot() {
+  const template =
+`robot "New Bot" version "1.0"
+
+meta {
+  author: "You"
+  class: "brawler"
+}
+
+on spawn {
+}
+
+on tick {
+  let enemy = nearest_enemy()
+  if enemy != null {
+    attack enemy
+  }
+}
+`;
+  editorEl.value = template;
+  currentEditorBotName = "New Bot";
+  currentEditorUserBotId = null;
+  currentPreset = "";
+  presetButtons.forEach((btn) => btn.classList.remove("active"));
+  document.querySelectorAll(".sidebar-user-bot").forEach((el) => el.classList.remove("active"));
+  compiledPlayer = null;
+  btnRun.disabled = true;
+  clearErrors();
+  updateHighlighting();
+  updateLineNumbers();
+  updateEditorFileName();
+  updateArenaLoadedBotLabel();
+  setView("builder");
+  editorEl.focus();
+}
+document.getElementById("btn-library-new")?.addEventListener("click", newEmptyBot);
+document.getElementById("btn-sidebar-new-bot")?.addEventListener("click", newEmptyBot);
+
+// Drag & drop on library dropzone
+if (libraryDropzoneEl) {
+  ["dragenter", "dragover"].forEach((ev) => {
+    libraryDropzoneEl.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      libraryDropzoneEl.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach((ev) => {
+    libraryDropzoneEl.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      libraryDropzoneEl.classList.remove("dragover");
+    });
+  });
+  libraryDropzoneEl.addEventListener("drop", (e) => {
+    const files = e.dataTransfer?.files;
+    if (files?.length) handleFileUpload(files);
+  });
+  libraryDropzoneEl.addEventListener("click", () => libraryFileInput?.click());
+}
+
+// Library filters
+librarySearchEl?.addEventListener("input", renderLibrary);
+libraryFilterClassEl?.addEventListener("change", renderLibrary);
+
+// Arena sidebar "Run Match" button (duplicates btn-run but always available)
+document.getElementById("btn-arena-run")?.addEventListener("click", () => {
+  if (!compiledPlayer) {
+    if (!doCompile()) {
+      toast("Fix compile errors in Builder first.", "error");
+      setView("builder");
+      return;
+    }
+  }
+  doRunMatch();
+});
+
+// React to any library change: refresh dependent UI
+BotLibrary.subscribe(() => {
+  renderSidebarUserBots();
+  refreshOpponentSelect();
+  if (currentView === "library") renderLibrary();
+});
+
+// ============================================================================
 // Init
 // ============================================================================
 
+refreshOpponentSelect();
+renderSidebarUserBots();
 loadPreset("bruiser");
 drawIdle();
+updateEditorFileName();
+updateArenaLoadedBotLabel();
 logToConsole(`ArenaScript v${ENGINE_VERSION} — Ready`, "event");
-logToConsole("Select a bot preset or write your own, then Compile & Run.", "info");
+logToConsole("Select a preset, upload a bot in My Bots, or write your own — then Compile & Run.", "info");
