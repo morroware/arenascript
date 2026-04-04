@@ -17,23 +17,26 @@ This document analyzes AI Wars: The Insect Mind (Cybugs) and other classic AI pr
 - Turn-based execution on a 2D grid battlefield (later 3D visualization)
 - Zero player control once battle starts -- pure AI vs AI
 
-### CAICL Language Features
+### CAICL Language Features (Cybug A.I. Command Language)
 - BASIC-like syntax with simple imperative commands
 - Beginner-friendly: graphical drag-and-drop icon programming mode
 - Advanced mode: text-based CAICL editor with full language access
 - Built-in code verification and debugging tools
 - Commands ranged from simple (`move forward`, `turn left`, `launch missile`) to advanced mathematical scanning expressions
+- **Self-modifying code**: CAICL could build commands in memory and execute them at runtime, enabling truly adaptive AI
+- **Command weighting via BSCP**: Commands processed in weighted packets by the Battle Simulation Coordination Processor -- movement commands were "heavier" than scan commands, logic was lightweight. This created a real tradeoff between thinking and acting.
+- **Reaction speed vs intelligence**: If code between action statements was too long, the bug would "think too long" and get killed by faster-reacting bugs -- a brilliant tension between complex decision-making and responsiveness
 
 ### Cybug Equipment & Systems (What Made It Rich)
 
 | Category | Systems |
 |----------|---------|
-| **Weapons** | Guns, missiles, grenades, mines, energy discharges |
-| **Defense** | Shields, cloaking device |
-| **Sensors** | Scanners (directional), GPS scan, friend-or-foe beacons |
-| **Communication** | Inter-bug messaging/signals |
-| **Special** | Self-destruct mechanism |
-| **Resources** | Fuel, ammo, heat management, energy cells |
+| **Weapons** | Main gun (5-grid range), missiles (unlimited range, slow, expensive), grenades, mines, short-range energy discharge ("Zap" -- damages self too) |
+| **Defense** | Shield generator (generates heat over time), cloaking device, armored shell |
+| **Sensors** | Directional scanners, GPS scan, IFF (Identify Friend or Foe) beacons with secret team codes |
+| **Communication** | Inter-bug messaging, **hive variables** (shared team memory on BSCP) |
+| **Special** | Self-destruct (energy discharge set to maximum), password-protected/encrypted scripts |
+| **Resources** | Fuel (crystalline converter), ammo (Ammilian alloy converter -- different weapons cost different amounts), heat (cooling system, can overwhelm), energy cells |
 
 ### Key Game Mechanics
 
@@ -59,21 +62,26 @@ This document analyzes AI Wars: The Insect Mind (Cybugs) and other classic AI pr
    - Planning and problem solving
 
 ### What Made Cybugs Compelling
-- Simple language, deep strategy
+- Simple language, deep strategy -- CAICL was approachable but had immense depth
 - The resource management triangle (fuel/ammo/heat) created meaningful decisions every turn
+- Self-modifying code allowed truly adaptive AI strategies
 - Cloaking and directional scanning created information asymmetry
 - Strategy nodes created map objectives beyond combat
-- Downloadable/tradeable bugs created a community
-- Post-battle blow-by-blow commentary and scoring
+- Hive variables enabled sophisticated team coordination
+- Downloadable/tradeable bugs created a community; "Arena of Champions" tournaments via email
+- Post-battle blow-by-blow commentary and scoring (printable)
+- Password-protected Cybugs enabled competitive secrecy (share bot, not source code)
+- Accessibility gradient: icon drag-drop for beginners, full CAICL for experts
+- Custom map editor with configurable game settings
 
 ### Cybugs' Limitations
 - BASIC-like language was primitive and verbose
-- No squad/team coordination beyond basic signals
-- 2D grid movement was simplistic
-- No ranked online play or matchmaking
+- Windows-only (95/98/ME/NT/2K/XP), closed-source
+- Competitions were via email (no integrated online matchmaking)
+- CAICL documentation locked inside game's built-in editor (hard to access externally)
 - No deterministic replay system
-- Limited visualization
-- Heat/fuel bookkeeping could be tedious without good tooling
+- Community eventually dwindled; browser remake stalled (2 commits on GitHub)
+- No evolution or learning -- all intelligence was hand-coded (self-modifying code was partial workaround)
 
 ---
 
@@ -210,19 +218,32 @@ Currently `fire_at` and `burst_fire` have fixed damage/speed. Make it a decision
 - This creates a skill-based prediction game: lead shots on fast targets, power shots on slow ones
 - New sensor: `incoming_projectile()` -- detect bullets heading toward you (dodge mechanic)
 
-#### 5. Self-Destruct Mechanic
-**Inspiration**: Cybugs self-destruct
+#### 5. Self-Destruct & Energy Discharge ("Zap") Mechanic
+**Inspiration**: Cybugs self-destruct and short-range energy discharge
 
-Add a desperation / sacrifice ability:
+Add risk/reward close-combat abilities:
+- `zap` -- short-range energy discharge (2-unit radius), deals 12 damage to enemies AND 4 damage to self
+  - Creates a high-risk melee option for desperate situations
+  - Rewards aggressive positioning while punishing recklessness
 - `self_destruct` -- robot explodes after 3-tick countdown
-- Deals 50 damage in 5-unit radius
-- Enemy robots can see the countdown (via sensor) and attempt to flee
-- Creates dramatic clutch moments and sacrifice plays in squad combat
-- Anti-cheese: only available below 20% HP
+  - Deals 50 damage in 5-unit radius
+  - Enemy robots can see the countdown (via sensor) and attempt to flee
+  - Creates dramatic clutch moments and sacrifice plays in squad combat
+  - Anti-cheese: only available below 20% HP
+
+#### 6. Hive Variables (Enhanced Team Communication)
+**Inspiration**: Cybugs hive variables on the BSCP
+
+Upgrade `send_signal` to a shared team memory system:
+- `hive_set(key, value)` -- write to shared team memory
+- `hive_get(key)` -- read from shared team memory
+- Enables sophisticated squad coordination: marking enemy positions, calling formations, sharing discovered map info
+- Much richer than the current simple signal system
+- Budget cost per read/write to prevent abuse
 
 ### Tier 2: Game Mode Expansion (Increase Replayability)
 
-#### 6. Collection Mode
+#### 7. Collection Mode
 **Inspiration**: Gladiabots
 
 New win condition mode:
@@ -233,15 +254,15 @@ New win condition mode:
 - New sensors: `nearest_resource()`, `team_resources()`, `carrying()`
 - Creates entirely different bot archetypes (collector vs. fighter vs. guard)
 
-#### 7. King of the Hill Mode
+#### 8. King of the Hill Mode
 Single control point in center, team with most total hold time wins. Simple but creates intense positional battles.
 
-#### 8. Survival / Endless Mode
+#### 9. Survival / Endless Mode
 Waves of increasingly difficult NPC enemies. Score-based. Good for solo play and testing bot resilience.
 
 ### Tier 3: Competitive & Social Features
 
-#### 9. Post-Battle Analytics
+#### 10. Post-Battle Analytics
 **Inspiration**: Cybugs blow-by-blow commentary
 
 After each match, generate:
@@ -252,7 +273,7 @@ After each match, generate:
 - Win probability graph over time
 - This is huge for learning and engagement
 
-#### 10. Bot Sharing & Marketplace
+#### 11. Bot Sharing & Marketplace
 **Inspiration**: Cybugs community trading
 
 Allow players to:
@@ -261,7 +282,7 @@ Allow players to:
 - "Challenge" a specific shared bot
 - Leaderboard of most-forked/most-winning shared bots
 
-#### 11. Campaign / Tutorial Progression
+#### 12. Campaign / Tutorial Progression
 **Inspiration**: Gladiabots campaign
 
 Structured progression:
@@ -272,7 +293,7 @@ Structured progression:
 
 ### Tier 4: Language Enhancements
 
-#### 12. Active Radar Sweep (Directional Scanning)
+#### 13. Active Radar Sweep (Directional Scanning)
 **Inspiration**: Cybugs directional scan, Robocode radar
 
 Replace omniscient `nearest_enemy()` with an active scanning model:
@@ -282,7 +303,7 @@ Replace omniscient `nearest_enemy()` with an active scanning model:
 - This is the single biggest "skill ceiling" improvement possible
 - **Note**: This is a significant gameplay change -- could be an optional "hardcore" mode
 
-#### 13. Opponent Memory & Modeling
+#### 14. Opponent Memory & Modeling
 **Inspiration**: Cybugs "ability to model opponents"
 
 Enhance the `last_seen_enemy()` system:
@@ -298,26 +319,30 @@ Enhance the `last_seen_enemy()` system:
 ### Phase 1: Resource Economy (Biggest Impact)
 1. Add fuel/ammo/heat resource system to robot state
 2. Add resupply depot arena objects
-3. Add related sensors and commands
+3. Add related sensors and commands (`fuel()`, `ammo()`, `heat()`, `vent_heat`, `conserve`)
 4. Update balance constants per class
-5. Update engine tick phases
+5. Update engine tick phases for resource consumption/heat dissipation
 
-### Phase 2: Information Warfare
+### Phase 2: Combat & Information Warfare
 1. Add cloaking command and stealth state
-2. Add directional scanning (optional hardcore mode)
-3. Add incoming projectile detection
-4. Add bullet power/speed tradeoff
+2. Add "zap" self-damaging energy discharge
+3. Add bullet power/speed tradeoff for `fire_at`
+4. Add incoming projectile detection sensor
+5. Add directional scanning (optional "hardcore" mode)
+6. Add self-destruct mechanic
 
-### Phase 3: Game Modes
-1. Collection mode
-2. King of the Hill mode
-3. Survival/wave mode
+### Phase 3: Team Communication & Game Modes
+1. Hive variables (shared team memory: `hive_set`/`hive_get`)
+2. Collection mode
+3. King of the Hill mode
+4. Survival/wave mode
 
 ### Phase 4: Competitive Polish
-1. Post-battle analytics dashboard
-2. Bot sharing system
-3. Campaign/tutorial progression
-4. Visual programming mode (stretch goal)
+1. Post-battle analytics dashboard (timeline, heat maps, commentary)
+2. Bot sharing system with optional source code obfuscation
+3. Campaign/tutorial progression (20-30 missions)
+4. Opponent modeling sensors (`predict_position`, `enemy_pattern`)
+5. Visual programming mode (stretch goal)
 
 ---
 
