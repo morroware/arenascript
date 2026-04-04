@@ -6,6 +6,7 @@ import { distance, sub, normalize, scale, add } from "../shared/vec2.js";
 import {
   CLASS_STATS, DEFAULT_VISION_RANGE, LOS_RANGE,
   OVERWATCH_VISION_BONUS, PICKUP_VISION_BONUS,
+  CLOAK_BREAK_DISTANCE,
 } from "../shared/config.js";
 
 function visionRangeFor(robot) {
@@ -97,7 +98,10 @@ export function getVisibleEnemies(world, robot) {
   for (const other of world.robots.values()) {
     if (!other.alive) continue;
     if (other.teamId === robot.teamId) continue;
-    if (distance(robot.position, other.position) > visionRange) continue;
+    const d = distance(robot.position, other.position);
+    if (d > visionRange) continue;
+    // Cloaked enemies are invisible except at very close range.
+    if (other.cloakActive && d > CLOAK_BREAK_DISTANCE) continue;
     if (hasLineOfSight(world, robot.position, other.position)) {
       visible.push(other);
     }

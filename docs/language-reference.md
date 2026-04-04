@@ -323,6 +323,20 @@ Commands are actions your robot performs. Each has cooldowns and energy costs.
 | `mark_position <position>` | Write a remembered waypoint position |
 | `taunt` | Apply taunt effect in range |
 | `overwatch` | Enter overwatch stance with temporary bonuses |
+| `fire_light <target>` | Fast, low-damage, long-range shot (4 dmg, 18 range, 4 tick CD, 1 ammo). Hard-to-dodge chip damage. |
+| `fire_heavy <target>` | Slow, high-damage shot (22 dmg, 14 range, 14 tick CD, 4 ammo). High heat, slow bullet speed. |
+| `zap` | Short-range energy discharge (4 unit radius, 18 dmg to enemies, 5 dmg to self). Desperation melee. |
+| `vent_heat` | Skip this tick's combat to aggressively cool the heat sink. |
+| `cloak` | Become invisible to enemy sensors (60 tick duration). Broken by attacking, taking damage, or being within 4 units of an enemy. |
+| `self_destruct` | Arm a 30-tick countdown. Detonates for 60 AoE damage in 7-unit radius, destroying self. Only available below 35% HP. Cannot be cancelled. |
+
+### Resource Economy (Heat + Ammo)
+
+Every combat action now feeds into a three-resource model: **health**, **heat**, and **ammo**.
+
+- **Heat** builds from firing weapons and using abilities. At 100 the robot is *overheated* and cannot fire until it cools below 60. Different robot classes dissipate heat at different rates (tanks overheat easily, brawlers cool fastest).
+- **Ammo** is finite per-spawn and only replenishes at resupply depots. Each weapon has a different ammo cost. Melee `attack` and `zap` cost no ammo.
+- **Resupply depots** are neutral map objects placed in the arena middle. Standing on one refills ammo and vents heat each tick — contested map objectives.
 
 ## Built-in Sensors
 
@@ -384,6 +398,22 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `has_effect(name)` | boolean | Whether robot has named status effect |
 | `is_taunted()` | boolean | Whether robot is taunted |
 | `is_in_overwatch()` | boolean | Whether robot is in overwatch |
+| `heat()` | number | Current heat level (0 to max_heat) |
+| `max_heat()` | number | Heat cap before overheating (100) |
+| `heat_percent()` | number | Heat as a 0-100 percentage |
+| `overheated()` | boolean | Whether combat actions are currently disabled due to heat |
+| `ammo()` | number | Current ammo remaining |
+| `max_ammo()` | number | Max ammo capacity for this robot class |
+| `ammo_percent()` | number | Ammo as a 0-100 percentage |
+| `is_cloaked()` | boolean | Whether cloak is currently active |
+| `cloak_remaining()` | number | Ticks of cloak remaining (0 if inactive) |
+| `self_destruct_armed()` | boolean | Whether self-destruct countdown is ticking |
+| `self_destruct_remaining()` | number | Ticks until detonation (0 if not armed) |
+| `nearest_depot()` | depot or `null` | Nearest resupply depot with `position`, `radius`, `distance` |
+| `is_on_depot()` | boolean | Whether robot is currently standing inside a resupply depot |
+| `hive_get(key)` | value or `null` | Read a value from the shared team memory |
+| `hive_set(key, value)` | value | Write a value to the shared team memory (visible to all squad members) |
+| `hive_has(key)` | boolean | Whether the team has stored a value under `key` |
 
 ### Entity Properties
 

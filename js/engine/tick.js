@@ -27,6 +27,11 @@ import {
   OVERWATCH_DURATION, OVERWATCH_COOLDOWN, OVERWATCH_ENERGY_COST,
   TAUNT_DURATION, TAUNT_COOLDOWN, TAUNT_RANGE, TAUNT_ENERGY_COST,
   DESTRUCTIBLE_COVER_RATIO,
+  CLOAK_DURATION, CLOAK_COOLDOWN, CLOAK_ENERGY_COST,
+  SELF_DESTRUCT_COUNTDOWN, SELF_DESTRUCT_RADIUS, SELF_DESTRUCT_DAMAGE,
+  SELF_DESTRUCT_HEALTH_THRESHOLD,
+  DEPOT_COUNT, DEPOT_RADIUS, DEPOT_AMMO_PER_TICK, DEPOT_HEAT_VENT_PER_TICK,
+  HEAT_MAX,
 } from "../shared/config.js";
 import { distance, vec2 } from "../shared/vec2.js";
 
@@ -258,10 +263,12 @@ export function runMatch(setup) {
     // Phase 7c: Collect pickups
     collectPickups(world, tick);
 
-    // Phase 8: Apply damage/effects (projectiles, zones)
+    // Phase 8: Apply damage/effects (projectiles, zones, depots, self-destruct)
     updateProjectiles(world);
     applyHealingZones(world);
     applyHazardZones(world);
+    applyDepots(world);
+    resolveSelfDestructs(world, tick);
 
     // Phase 8b: Update robot discovery memory for nearby map features
     updateDiscovery(world);
@@ -496,6 +503,36 @@ function initializeArenaLayout(world) {
       break;
     }
   }
+
+  // --- Resupply Depots (symmetric, contestable map objectives) ---
+  // Place DEPOT_COUNT depots in the neutral middle region, symmetrically
+  // around the arena center so neither team starts with a free claim.
+  for (let i = 0; i < DEPOT_COUNT; i++) {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      // Split the horizontal midline into DEPOT_COUNT slots.
+      const slot = (i + 0.5) / DEPOT_COUNT;
+      const x = w * (0.35 + slot * 0.30); // between 35% and 65% horizontally
+      const y = rng.nextFloat(h * 0.30, h * 0.70);
+      const pos = vec2(x, y);
+      if (isTooCloseToSpawn(pos)) continue;
+      if (isTooCloseToExisting(pos, 10, world.depots)) continue;
+      if (isTooCloseToExisting(pos, 6, world.hazards)) continue;
+      world.addDepot(pos, DEPOT_RADIUS);
+      break;
+    }
+  }
+}
+
+/** Any robot standing on a resupply depot gets ammo refilled and heat vented. */
+function applyDepots(world) {
+  for (const depot of world.depots.values()) {
+    for (const robot of world.getAliveRobots()) {
+      if (distance(robot.position, depot.position) <= depot.radius) {
+        robot.ammo = Math.min(robot.maxAmmo ?? 0, (robot.ammo ?? 0) + DEPOT_AMMO_PER_TICK);
+        robot.heat = Math.max(0, (robot.heat ?? 0) - DEPOT_HEAT_VENT_PER_TICK);
+      }
+    }
+  }
 }
 
 function applyHealingZones(world) {
@@ -640,6 +677,55 @@ function resolveUtilityAction(world, robot, action, robotStats) {
       robot.energy = Math.max(0, robot.energy - OVERWATCH_ENERGY_COST);
       break;
     }
+    case "cloak": {
+      // Toggle/start cloak. Hides robot from nearest_enemy/visible_enemies
+      // except at very close range. Breaks on any offensive action or damage.
+      const cd = robot.cooldowns.get("cloak") ?? 0;
+      if (cd > 0) break;
+      if (robot.energy < CLOAK_ENERGY_COST) break;
+      robot.cloakActive = true;
+      robot.cloakExpiresTick = world.currentTick + CLOAK_DURATION;
+      robot.cooldowns.set("cloak", CLOAK_COOLDOWN);
+      robot.energy = Math.max(0, robot.energy - CLOAK_ENERGY_COST);
+      break;
+    }
+    case "self_destruct": {
+      // Arm a detonation countdown. Only available below the HP threshold
+      // so it's a desperation tool, not a spam weapon. Once armed it can't
+      // be cancelled — this is what makes it dramatic.
+      if (robot.selfDestructTick > 0) break;
+      if (robot.health / robot.maxHealth > SELF_DESTRUCT_HEALTH_THRESHOLD) break;
+      robot.selfDestructTick = world.currentTick + SELF_DESTRUCT_COUNTDOWN;
+      break;
+    }
+  }
+}
+
+/** Detonate any armed self-destructs whose countdown has elapsed. */
+function resolveSelfDestructs(world, tick) {
+  for (const robot of world.getAliveRobots()) {
+    if (!robot.selfDestructTick || robot.selfDestructTick > tick) continue;
+    // Detonate: AoE damage to all robots (friendly fire included — sacrifice play)
+    const center = robot.position;
+    for (const other of world.getAliveRobots()) {
+      if (other.id === robot.id) continue;
+      if (distance(other.position, center) <= SELF_DESTRUCT_RADIUS) {
+        applyDamage(world, other, SELF_DESTRUCT_DAMAGE, robot.id);
+      }
+    }
+    // Also damage nearby destructible cover
+    const coversToRemove = [];
+    for (const [coverId, cover] of world.covers) {
+      if (!cover.destructible) continue;
+      if (distance(cover.position, center) <= SELF_DESTRUCT_RADIUS) {
+        cover.health -= SELF_DESTRUCT_DAMAGE;
+        if (cover.health <= 0) coversToRemove.push(coverId);
+      }
+    }
+    for (const id of coversToRemove) world.covers.delete(id);
+    // Finally destroy the self-destructing robot.
+    applyDamage(world, robot, robot.health + 1, robot.id);
+    robot.selfDestructTick = 0;
   }
 }
 

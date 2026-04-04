@@ -12,6 +12,9 @@ const ACTION_KEYWORDS = new Set([
   "mark_target", "capture", "ping",
   "move_forward", "move_backward", "turn_left", "turn_right",
   "place_mine", "send_signal", "mark_position", "taunt", "overwatch",
+  // Resource economy + advanced combat
+  "fire_light", "fire_heavy", "zap", "vent_heat",
+  "cloak", "self_destruct",
 ]);
 
 export class ParseError extends Error {
