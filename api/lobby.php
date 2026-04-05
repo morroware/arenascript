@@ -41,12 +41,22 @@ class LobbyManager
             $name = 'Untitled Lobby';
         }
 
-        $maxPlayers = match ($mode) {
-            '2v2'       => 4,
-            'squad_2v2' => 8,
-            'ffa'       => 8,
-            default     => 2,
-        };
+        // Whitelist of user-creatable lobby modes. Modes like 'tournament'
+        // and 'test' are intentionally excluded — they're driven by other
+        // subsystems, not ad-hoc lobbies.
+        $modeMaxPlayers = [
+            '1v1_ranked'    => 2,
+            '1v1_unranked'  => 2,
+            'duel_1v1'      => 2,
+            '2v1_unranked'  => 3,
+            '2v2'           => 4,
+            'squad_2v2'     => 8,
+            'ffa'           => 8,
+        ];
+        if (!isset($modeMaxPlayers[$mode])) {
+            throw new InvalidArgumentException("Unsupported lobby mode: $mode");
+        }
+        $maxPlayers = $modeMaxPlayers[$mode];
 
         $id = 'lobby_' . bin2hex(random_bytes(16));
 
@@ -338,7 +348,12 @@ if (PHP_SAPI !== 'cli' && realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE
             case 'create':
                 $name = (string) ($body['name'] ?? 'Untitled Lobby');
                 $mode = (string) ($body['mode'] ?? '1v1_unranked');
-                as_respond(['lobby' => $manager->createLobby($player, $name, $mode)], 201);
+                try {
+                    $lobby = $manager->createLobby($player, $name, $mode);
+                } catch (InvalidArgumentException $e) {
+                    as_error($e->getMessage(), 400);
+                }
+                as_respond(['lobby' => $lobby], 201);
 
             case 'join':
                 $lobbyId = $body['lobbyId'] ?? null;

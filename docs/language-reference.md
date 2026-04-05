@@ -166,6 +166,66 @@ on low_health {
 }
 ```
 
+### `on enemy_seen`
+
+Fires the tick a previously-hidden enemy becomes visible to this robot. Useful
+for triggering opportunistic attacks or re-planning.
+
+```
+on enemy_seen {
+  set mode = "engage"
+}
+```
+
+### `on enemy_lost`
+
+Fires when a previously-visible enemy is no longer in line of sight. The
+natural place to transition back to patrol or search behavior.
+
+```
+on enemy_lost {
+  set mode = "patrol"
+}
+```
+
+### `on cooldown_ready`
+
+Fires when a combat ability comes off cooldown and is usable again. Helps
+latency-sensitive bots re-enter offense immediately.
+
+```
+on cooldown_ready {
+  let enemy = nearest_enemy()
+  if enemy != null { attack enemy }
+}
+```
+
+### `on destroyed`
+
+Fires at the tick this robot is killed. Use it to write persistent hive notes
+for squadmates (e.g. where you died, who killed you). The handler still runs
+before the robot is removed from the world.
+
+```
+on destroyed(event) {
+  hive_set("last_death", position())
+}
+```
+
+### `on signal_received`
+
+Fires when another member of this squad calls `send_signal`. The event payload
+contains the `data` field that was broadcast. Bodies of allied robots within
+signal range receive the event.
+
+```
+on signal_received(event) {
+  if event.data == "regroup" {
+    move_to nearest_ally()
+  }
+}
+```
+
 ## Functions
 
 Define reusable logic with `fn`:

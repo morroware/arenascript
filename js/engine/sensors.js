@@ -631,6 +631,12 @@ export function createSensorGateway(world) {
       }
 
       default:
+        // Semantic analysis rejects unknown sensors at compile time, so
+        // reaching this branch means compiler + runtime drifted apart.
+        // Surface it loudly in dev so new sensors don't get silently broken.
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn(`[sensor-gateway] Unhandled sensor '${sensorName}' — returning null. Add a case to createSensorGateway.`);
+        }
         return null;
     }
   };
