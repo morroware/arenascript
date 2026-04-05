@@ -328,6 +328,24 @@ function as_validate_program(mixed $program): array
             }
         }
     }
+    // Squad size is enforced client-side by the compiler (1..5). Re-check
+    // here so a tampered client can't spawn an unbalanced match.
+    if (isset($program['squad'])) {
+        if (!is_array($program['squad'])) {
+            $errors[] = 'program.squad must be an object';
+        } else {
+            $size = $program['squad']['size'] ?? 1;
+            if (!is_int($size) || $size < 1 || $size > 5) {
+                $errors[] = 'program.squad.size must be an integer from 1 to 5';
+            }
+            $roles = $program['squad']['roles'] ?? [];
+            if (!is_array($roles)) {
+                $errors[] = 'program.squad.roles must be an array';
+            } elseif (count($roles) > 5) {
+                $errors[] = 'program.squad.roles cannot exceed 5 entries';
+            }
+        }
+    }
     return $errors;
 }
 

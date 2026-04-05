@@ -2090,11 +2090,14 @@ function tbCreateBotCard(team, botKey) {
 
   const options = buildBotSelectOptions(botKey);
 
+  // `cls` is already validated against a whitelist upstream, but escape it
+  // defensively so that a corrupted localStorage entry can never inject HTML.
+  const safeCls = escapeHtml(cls);
   card.innerHTML = `
-    <div class="tb-card-icon ${cls}">${botIconLetter(botKey)}</div>
+    <div class="tb-card-icon ${safeCls}">${escapeHtml(botIconLetter(botKey))}</div>
     <div class="tb-card-body">
       <select class="tb-card-select">${options}</select>
-      <span class="tb-card-class">${cls}</span>
+      <span class="tb-card-class">${safeCls}</span>
     </div>
     <button class="tb-remove-btn" title="Remove">&times;</button>`;
 

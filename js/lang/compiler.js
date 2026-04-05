@@ -135,6 +135,13 @@ export class Compiler {
     if (program.constants) {
       for (const entry of program.constants.entries) {
         const val = this.#evaluateConstantExpr(entry.value);
+        if (typeof val === "number" && !Number.isFinite(val)) {
+          throw new CompileError(
+            `Constant '${entry.name}' evaluates to ${Number.isNaN(val) ? "NaN" : "Infinity"}; only finite numbers are allowed`,
+            entry.span.line,
+            entry.span.column,
+          );
+        }
         this.#evaluatedConstants.set(entry.name, val);
         let constIdx;
         if (typeof val === "number") {
@@ -153,11 +160,19 @@ export class Compiler {
     // Register state slots (may reference already-registered constants).
     if (program.state) {
       for (const entry of program.state.entries) {
+        const initial = this.#evaluateConstantExpr(entry.initialValue);
+        if (typeof initial === "number" && !Number.isFinite(initial)) {
+          throw new CompileError(
+            `State variable '${entry.name}' initial value is ${Number.isNaN(initial) ? "NaN" : "Infinity"}; only finite numbers are allowed`,
+            entry.span.line,
+            entry.span.column,
+          );
+        }
         const idx = this.#stateSlots.length;
         this.#stateSlots.push({
           name: entry.name,
           type: entry.type.name + (entry.type.nullable ? "?" : ""),
-          initialValue: this.#evaluateConstantExpr(entry.initialValue),
+          initialValue: initial,
         });
         this.#stateIndexMap.set(entry.name, idx);
       }

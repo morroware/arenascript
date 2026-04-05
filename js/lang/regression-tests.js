@@ -1056,6 +1056,72 @@ function testProgramIdIsUniqueWhenTimeIsFrozen() {
   }
 }
 
+function testRejectsNonFiniteConstants() {
+  // The lexer doesn't currently accept scientific notation, so users can't
+  // easily write 1e500 directly. We construct a synthetic AST to exercise
+  // the compile-time guard against non-finite constants — this protects
+  // future grammar additions (sqrt, pow, exponent literals) from silently
+  // poisoning downstream math.
+  const span = { line: 1, column: 1 };
+  const ast = {
+    kind: "Program",
+    span,
+    robot: { name: "BadConst", version: "1.0", span },
+    meta: null,
+    squad: null,
+    constants: {
+      entries: [{
+        name: "HUGE",
+        span,
+        value: {
+          kind: "BinaryExpr",
+          operator: "*",
+          span,
+          left:  { kind: "NumberLiteral", value: 1e300, span },
+          right: { kind: "NumberLiteral", value: 1e300, span },
+        },
+      }],
+      span,
+    },
+    state: null,
+    functions: [],
+    handlers: [],
+  };
+  const compiler = new Compiler();
+  assert.throws(() => compiler.compile(ast), /Infinity|finite/i);
+}
+
+function testRejectsNonFiniteStateInitializer() {
+  const span = { line: 1, column: 1 };
+  const ast = {
+    kind: "Program",
+    span,
+    robot: { name: "BadState", version: "1.0", span },
+    meta: null,
+    squad: null,
+    constants: null,
+    state: {
+      entries: [{
+        name: "x",
+        type: { name: "number", nullable: false, span },
+        span,
+        initialValue: {
+          kind: "BinaryExpr",
+          operator: "*",
+          span,
+          left:  { kind: "NumberLiteral", value: 1e300, span },
+          right: { kind: "NumberLiteral", value: 1e300, span },
+        },
+      }],
+      span,
+    },
+    functions: [],
+    handlers: [],
+  };
+  const compiler = new Compiler();
+  assert.throws(() => compiler.compile(ast), /Infinity|finite/i);
+}
+
 function testMatchIdIsUniqueWhenTimeIsFrozen() {
   const bot = compile(`robot "FrozenTimeBot" version "1.0"
 on tick {
@@ -1147,6 +1213,8 @@ function run() {
     testDeterministicReplayWithSeed,
     testProgramIdIsUniqueWhenTimeIsFrozen,
     testMatchIdIsUniqueWhenTimeIsFrozen,
+    testRejectsNonFiniteConstants,
+    testRejectsNonFiniteStateInitializer,
   ];
 
   let passed = 0;
