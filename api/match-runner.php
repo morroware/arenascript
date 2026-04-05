@@ -1,240 +1,266 @@
 <?php
 // ============================================================================
-// Match Runner — Server-authoritative match execution
+// Match Runner — Result ingestion, history, and replay storage
+// ----------------------------------------------------------------------------
+// Model (beta): the deterministic match engine lives in JavaScript
+// (js/engine/tick.js). The PHP backend is NOT authoritative for simulation —
+// porting the 17k-LOC engine would be a separate, large project. Instead,
+// clients submit the result of a locally-run match along with the seed,
+// participant list, and optional replay blob. The server:
+//
+//   1. Validates the structural shape of the submission.
+//   2. Verifies the submitting player is one of the listed participants
+//      (via the X-Arena-Player auth header) so one player can't report a
+//      match on another's behalf.
+//   3. Persists a match history record + replay blob keyed by matchId.
+//   4. Updates Elo ratings for ranked modes.
+//
+// This is sufficient for an honest-player beta. A server-authoritative
+// "re-run the engine and reject mismatches" mode is future work and is
+// scoped in api/README.md.
 // ============================================================================
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/ranked.php';
+require_once __DIR__ . '/_bootstrap.php';
 
 class MatchRunner
 {
-    /** @var array[] Match history records */
-    private array $matchHistory = [];
-
-    /** @var array<string, array> matchId => ReplayData */
-    private array $replays = [];
-
+    private JsonStore $historyStore;
+    private JsonStore $replayStore;
     private RatingStore $ratingStore;
 
-    public function __construct(RatingStore $ratingStore)
+    public function __construct(?RatingStore $ratingStore = null)
     {
-        $this->ratingStore = $ratingStore;
+        $this->ratingStore  = $ratingStore ?? new RatingStore();
+        $this->historyStore = new JsonStore('match-history');
+        $this->replayStore  = new JsonStore('replays');
     }
 
     /**
-     * Execute a server-authoritative ranked match.
+     * Record a client-submitted match result.
      *
-     * The $request parameter expects:
-     *   'player1' => ['playerId' => string, 'program' => array, 'constants' => array]
-     *   'player2' => ['playerId' => string, 'program' => array, 'constants' => array]
-     *   'config'  => MatchConfig array
+     * Expected $request shape:
+     *   {
+     *     config:       { mode, arenaWidth, arenaHeight, maxTicks, tickRate, seed },
+     *     participants: [ { playerId, teamId, program: { programId, robotName, robotClass, bytecode } } ],
+     *     result:       { winner, tickCount, reason, seed },
+     *     replay?:      { ... opaque replay blob ... }
+     *   }
      *
-     * NOTE: The actual match engine (runMatch) is not ported here.
-     *       This method provides the orchestration shell; plug in your
-     *       PHP engine implementation via the runMatchEngine() hook.
+     * $reporterId is the authenticated player submitting the record; they
+     * must be listed in `participants`.
      *
-     * @param array $request  MatchRequest
-     * @return array          MatchResponse {record, result, replay}
+     * @return array  { record, updatedRatings? }
      */
-    public function runRankedMatch(array $request): array
+    public function submitResult(array $request, string $reporterId): array
     {
-        $player1EloAtStart = $this->ratingStore->getOrCreate($request['player1']['playerId'])['elo'];
-        $player2EloAtStart = $this->ratingStore->getOrCreate($request['player2']['playerId'])['elo'];
+        // ---- Structural validation ----
+        if (!isset($request['config']) || !is_array($request['config'])) {
+            throw new InvalidArgumentException('config is required');
+        }
+        if (!isset($request['participants']) || !is_array($request['participants'])) {
+            throw new InvalidArgumentException('participants is required');
+        }
+        if (!isset($request['result']) || !is_array($request['result'])) {
+            throw new InvalidArgumentException('result is required');
+        }
 
-        $setup = [
-            'config'       => $request['config'],
-            'participants' => [
-                [
-                    'program'   => $request['player1']['program'],
-                    'constants' => $request['player1']['constants'],
-                    'playerId'  => $request['player1']['playerId'],
-                    'teamId'    => 0,
-                ],
-                [
-                    'program'   => $request['player2']['program'],
-                    'constants' => $request['player2']['constants'],
-                    'playerId'  => $request['player2']['playerId'],
-                    'teamId'    => 1,
-                ],
-            ],
-        ];
+        $config       = $request['config'];
+        $participants = $request['participants'];
+        $result       = $request['result'];
 
-        $result  = $this->runMatchEngine($setup);
-        $matchId = $result['replay']['metadata']['matchId'];
+        if (count($participants) < 2) {
+            throw new InvalidArgumentException('participants must contain at least 2 entries');
+        }
 
-        // Update ratings
-        if ($request['config']['mode'] === '1v1_ranked') {
-            if ($result['winner'] === 0) {
-                $this->ratingStore->recordResult(
-                    $request['player1']['playerId'],
-                    $request['player2']['playerId'],
-                    $matchId,
-                );
-            } elseif ($result['winner'] === 1) {
-                $this->ratingStore->recordResult(
-                    $request['player2']['playerId'],
-                    $request['player1']['playerId'],
-                    $matchId,
-                );
-            } else {
-                $this->ratingStore->recordDraw(
-                    $request['player1']['playerId'],
-                    $request['player2']['playerId'],
-                    $matchId,
-                );
+        $errors = [];
+        foreach ($participants as $i => $p) {
+            foreach (as_validate_participant($p) as $err) {
+                $errors[] = "participants[$i].$err";
             }
         }
+        $errors = array_merge($errors, as_validate_match_result($result));
 
-        // Create match record
-        $participants = [];
-        foreach ($result['replay']['metadata']['participants'] as $i => $p) {
-            $p['eloAtStart'] = $i === 0 ? $player1EloAtStart : $player2EloAtStart;
-            $participants[] = $p;
+        if (!empty($errors)) {
+            throw new InvalidArgumentException('Validation failed: ' . implode('; ', $errors));
         }
 
-        $now = (int) (microtime(true) * 1000);
+        // ---- Auth: reporter must be one of the participants ----
+        $reporterIsParticipant = false;
+        foreach ($participants as $p) {
+            if (($p['playerId'] ?? null) === $reporterId) {
+                $reporterIsParticipant = true;
+                break;
+            }
+        }
+        if (!$reporterIsParticipant) {
+            throw new DomainException('Reporter is not a participant in this match');
+        }
 
-        $record = [
-            'matchId'       => $matchId,
-            'config'        => $request['config'],
-            'participants'  => $participants,
-            'status'        => 'completed',
-            'winner'        => $result['winner'],
-            'startedAt'     => $now,
-            'endedAt'       => $now,
-            'replayId'      => $matchId,
-            'engineVersion' => ENGINE_VERSION,
-        ];
+        // ---- Config consistency check ----
+        if (($config['seed'] ?? null) !== ($result['seed'] ?? null)) {
+            throw new InvalidArgumentException('config.seed must match result.seed');
+        }
 
-        $this->matchHistory[] = $record;
-        $this->replays[$matchId] = $result['replay'];
-
-        return [
-            'record' => $record,
-            'result' => $result,
-            'replay' => $result['replay'],
-        ];
-    }
-
-    /**
-     * Run an unranked match (no Elo changes).
-     *
-     * @param array $request  MatchRequest
-     * @return array          MatchResponse
-     */
-    public function runUnrankedMatch(array $request): array
-    {
-        $unrankedConfig = ($request['config']['mode'] ?? null) === '1v1_ranked'
-            ? array_merge($request['config'], ['mode' => '1v1_unranked'])
-            : $request['config'];
-
-        return $this->runUnrankedMatchWithParticipants([
-            'config'       => $unrankedConfig,
-            'participants' => [
-                [
-                    'playerId'  => $request['player1']['playerId'],
-                    'program'   => $request['player1']['program'],
-                    'constants' => $request['player1']['constants'],
-                    'teamId'    => 0,
-                ],
-                [
-                    'playerId'  => $request['player2']['playerId'],
-                    'program'   => $request['player2']['program'],
-                    'constants' => $request['player2']['constants'],
-                    'teamId'    => 1,
-                ],
-            ],
-        ]);
-    }
-
-    /**
-     * Run an unranked match for any participant count (no Elo changes).
-     *
-     * @param array $request  ['config' => array, 'participants' => array[]]
-     * @return array          MatchResponse
-     */
-    public function runUnrankedMatchWithParticipants(array $request): array
-    {
-        $setup = [
-            'config'       => $request['config'],
-            'participants' => array_map(
-                fn(array $p): array => [
-                    'program'   => $p['program'],
-                    'constants' => $p['constants'],
-                    'playerId'  => $p['playerId'],
-                    'teamId'    => $p['teamId'],
-                ],
-                $request['participants'],
-            ),
-        ];
-
-        $result  = $this->runMatchEngine($setup);
-        $matchId = $result['replay']['metadata']['matchId'];
+        // ---- Persist record ----
+        $matchId = 'match_' . bin2hex(random_bytes(8));
         $now     = (int) (microtime(true) * 1000);
 
         $record = [
             'matchId'       => $matchId,
-            'config'        => $request['config'],
-            'participants'  => $result['replay']['metadata']['participants'],
-            'status'        => 'completed',
-            'winner'        => $result['winner'],
-            'startedAt'     => $now,
-            'endedAt'       => $now,
-            'replayId'      => $matchId,
+            'config'        => $config,
+            'participants'  => array_map(
+                fn(array $p): array => [
+                    'playerId'   => $p['playerId'],
+                    'teamId'     => $p['teamId'],
+                    'programId'  => $p['program']['programId']   ?? null,
+                    'robotName'  => $p['program']['robotName']   ?? null,
+                    'robotClass' => $p['program']['robotClass']  ?? null,
+                ],
+                $participants,
+            ),
+            'result'        => [
+                'winner'    => $result['winner'],
+                'tickCount' => $result['tickCount'],
+                'reason'    => $result['reason'],
+                'seed'      => $result['seed'],
+            ],
+            'reportedBy'    => $reporterId,
+            'reportedAt'    => $now,
             'engineVersion' => ENGINE_VERSION,
         ];
 
-        $this->matchHistory[] = $record;
-        $this->replays[$matchId] = $result['replay'];
+        $this->historyStore->mutate(function (array $state) use ($matchId, $record): array {
+            $history = $state['matches'] ?? [];
+            $history[] = $record;
+            // Cap history to the most recent 1000 matches per host to prevent
+            // unbounded file growth. Replays are stored separately and keyed
+            // by matchId; they follow the same retention.
+            if (count($history) > 1000) {
+                $dropped = array_splice($history, 0, count($history) - 1000);
+                // Drop the replays for evicted matches too.
+                // (We do this in a separate mutate to keep the lock scoped.)
+                $GLOBALS['AS_DROPPED_MATCH_IDS'] = array_map(
+                    fn(array $r): string => $r['matchId'],
+                    $dropped,
+                );
+            }
+            $state['matches'] = $history;
+            return [$state, null];
+        });
+
+        if (!empty($GLOBALS['AS_DROPPED_MATCH_IDS'] ?? [])) {
+            $dropped = $GLOBALS['AS_DROPPED_MATCH_IDS'];
+            unset($GLOBALS['AS_DROPPED_MATCH_IDS']);
+            $this->replayStore->mutate(function (array $state) use ($dropped): array {
+                foreach ($dropped as $id) {
+                    unset($state[$id]);
+                }
+                return [$state, null];
+            });
+        }
+
+        // Store replay blob separately so list endpoints stay cheap.
+        if (isset($request['replay']) && is_array($request['replay'])) {
+            $this->replayStore->mutate(function (array $state) use ($matchId, $request): array {
+                $state[$matchId] = $request['replay'];
+                return [$state, null];
+            });
+        }
+
+        // ---- Update ratings for ranked modes ----
+        $updatedRatings = null;
+        $mode = $config['mode'] ?? '';
+        if ($mode === '1v1_ranked' && count($participants) === 2) {
+            $p1 = $participants[0];
+            $p2 = $participants[1];
+            if ($result['winner'] === $p1['teamId']) {
+                $updatedRatings = $this->ratingStore->recordResult($p1['playerId'], $p2['playerId'], $matchId);
+            } elseif ($result['winner'] === $p2['teamId']) {
+                $updatedRatings = $this->ratingStore->recordResult($p2['playerId'], $p1['playerId'], $matchId);
+            } else {
+                $this->ratingStore->recordDraw($p1['playerId'], $p2['playerId'], $matchId);
+                $updatedRatings = [
+                    'a' => $this->ratingStore->find($p1['playerId']),
+                    'b' => $this->ratingStore->find($p2['playerId']),
+                ];
+            }
+        }
 
         return [
-            'record' => $record,
-            'result' => $result,
-            'replay' => $result['replay'],
+            'record'         => $record,
+            'updatedRatings' => $updatedRatings,
         ];
     }
 
-    /** @return array[] */
+    /** @return array[] most-recent first */
     public function getMatchHistory(int $limit = 50): array
     {
-        return array_slice($this->matchHistory, -$limit);
+        $state   = $this->historyStore->readAll();
+        $history = $state['matches'] ?? [];
+        $history = array_reverse($history); // most recent first
+        return array_slice($history, 0, max(0, $limit));
     }
 
     public function getReplay(string $matchId): ?array
     {
-        return $this->replays[$matchId] ?? null;
+        $state = $this->replayStore->readAll();
+        return $state[$matchId] ?? null;
     }
 
     public function getMatchCount(): int
     {
-        return count($this->matchHistory);
+        $state = $this->historyStore->readAll();
+        return count($state['matches'] ?? []);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// HTTP dispatcher
+// ----------------------------------------------------------------------------
+// POST /api/match-runner.php             -> submit a completed match result
+//                                           body: { config, participants, result, replay? }
+// GET  /api/match-runner.php             -> recent match history
+// GET  /api/match-runner.php?match=<id>  -> fetch a stored replay
+// ----------------------------------------------------------------------------
+
+if (PHP_SAPI !== 'cli' && realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
+    as_bootstrap();
+
+    $runner = new MatchRunner();
+    $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+
+    if ($method === 'GET') {
+        if (isset($_GET['match'])) {
+            $matchId = $_GET['match'];
+            if (!is_string($matchId) || !preg_match('/^match_[a-f0-9]{16}$/', $matchId)) {
+                as_error('Invalid match id', 400);
+            }
+            $replay = $runner->getReplay($matchId);
+            if ($replay === null) {
+                as_error('Replay not found', 404);
+            }
+            as_respond(['matchId' => $matchId, 'replay' => $replay]);
+        }
+        $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 50;
+        as_respond([
+            'count'   => $runner->getMatchCount(),
+            'matches' => $runner->getMatchHistory($limit),
+        ]);
     }
 
-    // -------------------------------------------------------------------------
-    // Engine hook — replace with actual match engine implementation
-    // -------------------------------------------------------------------------
-
-    /**
-     * Run the match engine. This is a stub that should be replaced with
-     * the actual PHP game engine when it is ported.
-     *
-     * @param array $setup  MatchSetup {config, participants}
-     * @return array        MatchResult {winner, replay: {metadata: {matchId, participants}}}
-     */
-    protected function runMatchEngine(array $setup): array
-    {
-        // Stub: generate a match ID and a placeholder result.
-        // Replace this with the real engine call.
-        $matchId = 'match_' . bin2hex(random_bytes(8));
-
-        return [
-            'winner' => null,
-            'replay' => [
-                'metadata' => [
-                    'matchId'      => $matchId,
-                    'participants' => $setup['participants'],
-                ],
-            ],
-        ];
+    if ($method === 'POST') {
+        $reporter = as_require_player();
+        try {
+            $response = $runner->submitResult(as_body(), $reporter);
+        } catch (InvalidArgumentException $e) {
+            as_error($e->getMessage(), 400);
+        } catch (DomainException $e) {
+            as_error($e->getMessage(), 403);
+        }
+        as_respond($response, 201);
     }
+
+    as_require_method('GET', 'POST');
 }
