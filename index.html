@@ -244,9 +244,9 @@
               <label class="speed-label">
                 Speed
                 <select id="replay-speed" class="replay-speed-select">
-                  <option value="0.25">0.25x</option>
+                  <option value="0.24" selected>0.24x</option>
                   <option value="0.5">0.5x</option>
-                  <option value="1" selected>1x</option>
+                  <option value="1">1x</option>
                   <option value="2">2x</option>
                   <option value="4">4x</option>
                   <option value="8">8x</option>
@@ -344,6 +344,19 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Match Live: Exit button (returns to editor) -->
+  <button id="btn-exit-match-live" class="match-live-exit" title="Return to editor">
+    <span>&#10094;</span> Back to Editor
+  </button>
+
+  <!-- Match Live: Scoreboard overlay -->
+  <div id="match-scoreboard" class="match-scoreboard">
+    <span class="scoreboard-team scoreboard-team-0" id="scoreboard-team0">Team 0</span>
+    <span class="scoreboard-vs">VS</span>
+    <span class="scoreboard-team scoreboard-team-1" id="scoreboard-team1">Team 1</span>
+    <span class="scoreboard-tick" id="scoreboard-tick"></span>
   </div>
 
   <!-- Toast / notification slot -->

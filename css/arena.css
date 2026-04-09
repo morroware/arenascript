@@ -1,0 +1,356 @@
+/* ============================================================================
+   Arena — Arena Pane, Canvas, Replay Controls, Match Results
+   ============================================================================ */
+
+/* ---- Arena Pane ---- */
+
+.arena-pane {
+  width: 440px;
+  min-width: 300px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  position: relative;
+}
+
+.arena-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+
+.arena-header .label {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+#arena-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+}
+
+/* ---- Arena Toggles ---- */
+
+.arena-toggles {
+  display: flex;
+  gap: 4px;
+}
+
+.arena-toggle-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.arena-toggle-btn:hover {
+  border-color: rgba(0, 212, 255, 0.3);
+  color: var(--text-primary);
+}
+
+.arena-toggle-btn.active {
+  background: var(--accent-cyan-dim);
+  border-color: rgba(0, 212, 255, 0.4);
+  color: var(--accent-cyan);
+}
+
+/* ---- Canvas Wrap ---- */
+
+.arena-canvas-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Ambient glow behind canvas during matches */
+.arena-canvas-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(0, 212, 255, 0.03) 0%, transparent 70%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-slow);
+}
+
+body.match-live .arena-canvas-wrap::before {
+  opacity: 1;
+}
+
+#arena-canvas {
+  background: #06060e;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-lg);
+  max-width: 100%;
+  max-height: 100%;
+  transition: box-shadow var(--transition-slow), border-color var(--transition-slow);
+}
+
+/* Canvas glow during live match */
+body.match-live #arena-canvas {
+  border-color: rgba(0, 212, 255, 0.12);
+  box-shadow:
+    0 0 30px rgba(0, 212, 255, 0.08),
+    0 0 60px rgba(0, 212, 255, 0.04),
+    inset 0 0 30px rgba(0, 212, 255, 0.02);
+}
+
+/* ---- Replay Controls ---- */
+
+.replay-controls {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+.replay-controls.visible {
+  display: flex;
+}
+
+/* Subtle top-edge glow on replay bar */
+.replay-controls::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.15), transparent);
+}
+
+.replay-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--accent-cyan);
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.replay-btn:hover {
+  background: var(--accent-cyan-dim);
+  border-color: rgba(0, 212, 255, 0.3);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.1);
+}
+
+.replay-btn.bookmark-btn {
+  width: auto;
+  border-radius: var(--radius-pill);
+  padding: 0 10px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--accent-orange);
+  border-color: rgba(255, 136, 0, 0.2);
+}
+
+.replay-btn.bookmark-btn:hover {
+  border-color: rgba(255, 136, 0, 0.4);
+  background: var(--accent-orange-dim);
+}
+
+.replay-btn.step-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 9px;
+  letter-spacing: -2px;
+}
+
+/* ---- Scrubber ---- */
+
+.replay-scrubber {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.replay-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+  transition: transform var(--transition-fast);
+}
+
+.replay-scrubber::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.replay-scrubber::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.4);
+}
+
+.replay-tick-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 80px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.speed-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.replay-speed-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 3px 6px;
+  font-family: var(--font-mono);
+}
+
+/* ---- Match Results ---- */
+
+.match-results {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: none;
+}
+
+.match-results.visible {
+  display: block;
+}
+
+.match-results-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 10px;
+  color: var(--accent-yellow);
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.result-item {
+  font-size: 12px;
+  padding: 4px 10px;
+  background: var(--bg-primary);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  border: 1px solid var(--border-subtle);
+}
+
+.result-item .rl {
+  color: var(--text-muted);
+  margin-right: 6px;
+  font-size: 10px;
+}
+
+.result-winner {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px;
+  border-radius: var(--radius);
+  background: var(--accent-green-dim);
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  color: var(--accent-green);
+  letter-spacing: 0.5px;
+}
+
+.result-winner.draw {
+  background: var(--accent-yellow-dim);
+  border-color: rgba(255, 221, 0, 0.2);
+  color: var(--accent-yellow);
+}
+
+/* ---- Per-Robot Detail ---- */
+
+.result-robot-detail {
+  margin-top: 8px;
+}
+
+.result-robot-header {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.result-robot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-primary);
+  border-radius: var(--radius);
+  margin-bottom: 2px;
+  border: 1px solid var(--border-subtle);
+}
+
+.result-robot-name {
+  font-weight: 700;
+  min-width: 60px;
+}
+
+.result-robot-stat {
+  color: var(--text-secondary);
+  font-size: 11px;
+}

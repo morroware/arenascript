@@ -695,6 +695,13 @@ const tbAllySlots = document.getElementById("tb-ally-slots");
 const tbEnemySlots = document.getElementById("tb-enemy-slots");
 const tbMatchInfo = document.getElementById("tb-match-info");
 
+// Match-live mode elements
+const btnExitMatchLive = document.getElementById("btn-exit-match-live");
+const matchScoreboard = document.getElementById("match-scoreboard");
+const scoreboardTeam0 = document.getElementById("scoreboard-team0");
+const scoreboardTeam1 = document.getElementById("scoreboard-team1");
+const scoreboardTick = document.getElementById("scoreboard-tick");
+
 if (!canvasEl) {
   throw new Error("Missing required #arena-canvas element in HTML");
 }
@@ -723,9 +730,11 @@ let replayPlaying = false;
 let replayFrameIndex = 0;
 let replayAnimId = null;
 let replayLabels = {};
-let replaySpeed = 1;
+let replaySpeed = 0.24;
 let lastReplayTimestamp = 0;
 let lastReplayBookmarks = null;
+let matchLiveMode = false;
+let matchLiveParticipants = null;
 
 /** Get seed from UI input, or generate a random one */
 function getMatchSeed() {
@@ -1359,13 +1368,22 @@ function drawArenaBackground() {
   const h = canvasEl.height;
   const s = canvasScale();
 
-  ctx.fillStyle = "#0a0a14";
+  // Deep dark background with subtle radial gradient
+  ctx.fillStyle = "#050510";
   ctx.fillRect(0, 0, w, h);
 
-  // Grid
-  ctx.strokeStyle = GRID_COLOR;
-  ctx.lineWidth = 0.5;
+  // Radial gradient center glow
+  const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.7);
+  grad.addColorStop(0, "rgba(0, 212, 255, 0.03)");
+  grad.addColorStop(0.5, "rgba(0, 100, 180, 0.015)");
+  grad.addColorStop(1, "transparent");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid - finer, more subtle
   const step = 10 * s;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.025)";
+  ctx.lineWidth = 0.5;
   for (let x = 0; x <= w; x += step) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
@@ -1379,25 +1397,62 @@ function drawArenaBackground() {
     ctx.stroke();
   }
 
-  // Border
-  ctx.strokeStyle = "#2a2a4a";
+  // Major grid lines every 50 units
+  const majorStep = 50 * s;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= w; x += majorStep) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= h; y += majorStep) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+
+  // Border with subtle glow
+  ctx.strokeStyle = "rgba(0, 212, 255, 0.08)";
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, w - 2, h - 2);
+
+  // Corner accents
+  const cornerLen = 20 * s;
+  ctx.strokeStyle = "rgba(0, 212, 255, 0.15)";
+  ctx.lineWidth = 2;
+  // Top-left
+  ctx.beginPath(); ctx.moveTo(1, cornerLen); ctx.lineTo(1, 1); ctx.lineTo(cornerLen, 1); ctx.stroke();
+  // Top-right
+  ctx.beginPath(); ctx.moveTo(w - cornerLen, 1); ctx.lineTo(w - 1, 1); ctx.lineTo(w - 1, cornerLen); ctx.stroke();
+  // Bottom-left
+  ctx.beginPath(); ctx.moveTo(1, h - cornerLen); ctx.lineTo(1, h - 1); ctx.lineTo(cornerLen, h - 1); ctx.stroke();
+  // Bottom-right
+  ctx.beginPath(); ctx.moveTo(w - cornerLen, h - 1); ctx.lineTo(w - 1, h - 1); ctx.lineTo(w - 1, h - cornerLen); ctx.stroke();
 
   // Hazard zones (draw first, behind everything)
   for (const hz of currentArenaLayout.hazards) {
     const cx = hz.x * s;
     const cy = hz.y * s;
     const r = hz.radius * s;
+    // Radial gradient for hazard
+    const hzGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    hzGrad.addColorStop(0, "rgba(255,51,51,0.12)");
+    hzGrad.addColorStop(0.7, "rgba(255,51,51,0.05)");
+    hzGrad.addColorStop(1, "rgba(255,51,51,0)");
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,51,51,0.08)";
+    ctx.fillStyle = hzGrad;
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,51,51,0.25)";
+    ctx.strokeStyle = "rgba(255,51,51,0.2)";
     ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.stroke();
-    ctx.fillStyle = "rgba(255,51,51,0.25)";
-    ctx.font = `${Math.max(7, 1.8 * s)}px sans-serif`;
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255,51,51,0.3)";
+    ctx.font = `bold ${Math.max(7, 1.8 * s)}px sans-serif`;
     ctx.textAlign = "center";
     ctx.fillText("HAZARD", cx, cy + 1.5 * s);
   }
@@ -1407,15 +1462,21 @@ function drawArenaBackground() {
     const cx = zone.x * s;
     const cy = zone.y * s;
     const r = zone.radius * s;
+    const hlGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    hlGrad.addColorStop(0, "rgba(0,255,136,0.1)");
+    hlGrad.addColorStop(0.7, "rgba(0,255,136,0.04)");
+    hlGrad.addColorStop(1, "rgba(0,255,136,0)");
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0,255,136,0.07)";
+    ctx.fillStyle = hlGrad;
     ctx.fill();
-    ctx.strokeStyle = "rgba(0,255,136,0.25)";
+    ctx.strokeStyle = "rgba(0,255,136,0.2)";
     ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.stroke();
-    ctx.fillStyle = "rgba(0,255,136,0.3)";
-    ctx.font = `${Math.max(7, 1.8 * s)}px sans-serif`;
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(0,255,136,0.35)";
+    ctx.font = `bold ${Math.max(7, 1.8 * s)}px sans-serif`;
     ctx.textAlign = "center";
     ctx.fillText("+HP", cx, cy + 1.5 * s);
   }
@@ -1428,30 +1489,48 @@ function drawArenaBackground() {
     const cx = (cover.x * s) - (cw / 2);
     const cy = (cover.y * s) - (ch / 2);
     if (cover.destructible) {
-      ctx.fillStyle = "rgba(180, 120, 80, 0.25)";
-      ctx.strokeStyle = "rgba(200, 140, 100, 0.5)";
+      ctx.fillStyle = "rgba(180, 120, 80, 0.2)";
+      ctx.strokeStyle = "rgba(200, 140, 100, 0.35)";
     } else {
-      ctx.fillStyle = "rgba(120, 140, 190, 0.2)";
-      ctx.strokeStyle = "rgba(140, 160, 220, 0.45)";
+      ctx.fillStyle = "rgba(80, 120, 200, 0.12)";
+      ctx.strokeStyle = "rgba(100, 150, 230, 0.3)";
     }
-    ctx.fillRect(cx, cy, cw, ch);
-    ctx.strokeRect(cx, cy, cw, ch);
+    // Rounded corners for cover
+    const cr = 2 * s;
+    ctx.beginPath();
+    ctx.moveTo(cx + cr, cy);
+    ctx.lineTo(cx + cw - cr, cy);
+    ctx.quadraticCurveTo(cx + cw, cy, cx + cw, cy + cr);
+    ctx.lineTo(cx + cw, cy + ch - cr);
+    ctx.quadraticCurveTo(cx + cw, cy + ch, cx + cw - cr, cy + ch);
+    ctx.lineTo(cx + cr, cy + ch);
+    ctx.quadraticCurveTo(cx, cy + ch, cx, cy + ch - cr);
+    ctx.lineTo(cx, cy + cr);
+    ctx.quadraticCurveTo(cx, cy, cx + cr, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
   }
 
   // Control points
-  ctx.fillStyle = "rgba(255,221,0,0.3)";
-  ctx.font = `${Math.max(8, 2 * s)}px ${getComputedStyle(document.body).getPropertyValue('--font-sans')}`;
+  ctx.font = `bold ${Math.max(8, 2 * s)}px sans-serif`;
   ctx.textAlign = "center";
   for (const cp of currentArenaLayout.controlPoints) {
     const cx = cp.x * s;
     const cy = cp.y * s;
+    const cpGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 4 * s);
+    cpGrad.addColorStop(0, "rgba(255,221,0,0.12)");
+    cpGrad.addColorStop(1, "rgba(255,221,0,0)");
     ctx.beginPath();
     ctx.arc(cx, cy, 4 * s, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255,221,0,0.08)";
+    ctx.fillStyle = cpGrad;
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,221,0,0.25)";
+    ctx.strokeStyle = "rgba(255,221,0,0.2)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
     ctx.stroke();
-    ctx.fillStyle = "rgba(255,221,0,0.3)";
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255,221,0,0.35)";
     ctx.fillText("CP", cx, cy + 6 * s);
   }
 }
@@ -1498,19 +1577,23 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
     ctx.setLineDash([]);
   }
 
-  // Glow
+  // Outer glow (larger, more dramatic)
+  const glowGrad = ctx.createRadialGradient(cx, cy, radius, cx, cy, radius + 8);
+  glowGrad.addColorStop(0, glow);
+  glowGrad.addColorStop(1, "transparent");
   ctx.beginPath();
-  ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
-  ctx.fillStyle = glow;
+  ctx.arc(cx, cy, radius + 8, 0, Math.PI * 2);
+  ctx.fillStyle = glowGrad;
   ctx.fill();
 
-  // Body
+  // Body with gradient
+  const bodyGrad = ctx.createRadialGradient(cx - radius * 0.3, cy - radius * 0.3, 0, cx, cy, radius);
+  bodyGrad.addColorStop(0, color);
+  bodyGrad.addColorStop(1, teamId === 0 ? "#006688" : "#881122");
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = bodyGrad;
   ctx.fill();
-  ctx.globalAlpha = 1.0;
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.stroke();
@@ -1567,10 +1650,14 @@ function drawProjectile(x, y) {
   const cy = y * s;
   const radius = 1.5 * s;
 
-  // Glow
+  // Outer glow
+  const projGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius + 6);
+  projGlow.addColorStop(0, "rgba(255,221,0,0.4)");
+  projGlow.addColorStop(0.5, "rgba(255,180,0,0.15)");
+  projGlow.addColorStop(1, "transparent");
   ctx.beginPath();
-  ctx.arc(cx, cy, radius + 3, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(255,221,0,0.25)";
+  ctx.arc(cx, cy, radius + 6, 0, Math.PI * 2);
+  ctx.fillStyle = projGlow;
   ctx.fill();
 
   // Core
@@ -1578,6 +1665,9 @@ function drawProjectile(x, y) {
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.fillStyle = "#ffdd00";
   ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
 }
 
 function drawFrame(frame, labels) {
@@ -1735,10 +1825,83 @@ function drawIdle() {
   drawArenaBackground();
   const w = canvasEl.width;
   const h = canvasEl.height;
-  ctx.fillStyle = "#444466";
-  ctx.font = "12px sans-serif";
+
+  // Centered message with subtle styling
+  ctx.fillStyle = "rgba(0, 212, 255, 0.15)";
+  ctx.font = `bold ${Math.max(12, w * 0.025)}px sans-serif`;
   ctx.textAlign = "center";
-  ctx.fillText("Compile a bot and run a match", w / 2, h / 2);
+  ctx.textBaseline = "middle";
+  ctx.fillText("AWAITING COMBATANTS", w / 2, h / 2 - 10);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+  ctx.font = `${Math.max(10, w * 0.018)}px sans-serif`;
+  ctx.fillText("Compile a bot and run a match", w / 2, h / 2 + 14);
+  ctx.textBaseline = "alphabetic";
+}
+
+// ============================================================================
+// Match-Live Mode (Arena Dominance)
+// ============================================================================
+
+function resizeCanvasToWrap() {
+  const wrap = document.querySelector(".arena-canvas-wrap");
+  if (wrap) {
+    const w = Math.max(400, wrap.clientWidth - 32);
+    const h = Math.max(400, wrap.clientHeight - 32);
+    if (canvasEl.width !== w || canvasEl.height !== h) {
+      canvasEl.width = w;
+      canvasEl.height = h;
+    }
+  }
+}
+
+function enterMatchLive(participants) {
+  if (matchLiveMode) return;
+  matchLiveMode = true;
+  matchLiveParticipants = participants;
+  document.body.classList.add("match-live");
+
+  // Resize canvas after CSS transition completes (0.4s)
+  setTimeout(resizeCanvasToWrap, 50);
+  setTimeout(resizeCanvasToWrap, 450);
+
+  // Populate scoreboard
+  if (participants && scoreboardTeam0 && scoreboardTeam1) {
+    const t0 = participants.filter(p => p.teamId === 0).map(p => {
+      const label = p.playerId === "player" ? "You" : p.playerId;
+      return label.charAt(0).toUpperCase() + label.slice(1);
+    });
+    const t1 = participants.filter(p => p.teamId === 1).map(p => {
+      return p.playerId.charAt(0).toUpperCase() + p.playerId.slice(1);
+    });
+    scoreboardTeam0.textContent = t0.join(" & ") || "Team 0";
+    scoreboardTeam1.textContent = t1.join(" & ") || "Team 1";
+  }
+}
+
+function exitMatchLive() {
+  if (!matchLiveMode) return;
+  matchLiveMode = false;
+  matchLiveParticipants = null;
+  document.body.classList.remove("match-live");
+
+  // Reset canvas size for builder view
+  if (currentView === "builder") {
+    canvasEl.width = 400;
+    canvasEl.height = 400;
+  } else if (currentView === "arena") {
+    requestAnimationFrame(resizeArenaCanvasForCurrentView);
+  }
+
+  // Redraw
+  if (replayData && replayData[replayFrameIndex]) {
+    drawFrame(replayData[replayFrameIndex], replayLabels);
+  }
+}
+
+function updateScoreboard(frame) {
+  if (!matchLiveMode || !frame || !scoreboardTick) return;
+  const totalTicks = replayData?.[replayData.length - 1]?.tick ?? 0;
+  scoreboardTick.textContent = `Tick ${frame.tick} / ${totalTicks}`;
 }
 
 // ============================================================================
@@ -1771,7 +1934,11 @@ function startReplay(result, opponentName) {
   replayLabels = labelsById;
   replayFrameIndex = 0;
   replayPlaying = true;
-  replaySpeed = parseFloat(replaySpeedSelect.value) || 1;
+  replaySpeed = parseFloat(replaySpeedSelect.value) || 0.24;
+
+  // Enter match-live mode — arena takes over the screen
+  const participants = result.replay.metadata?.participants ?? [];
+  enterMatchLive(participants);
 
   // Log bookmarks to console
   if (lastReplayBookmarks) {
@@ -1820,6 +1987,7 @@ function replayTick(timestamp) {
     drawFrame(frame, replayLabels);
     replayScrubber.value = replayFrameIndex;
     replayTickLabel.textContent = `${frame.tick} / ${replayData[replayData.length - 1].tick}`;
+    updateScoreboard(frame);
 
     replayFrameIndex++;
     if (replayFrameIndex >= replayData.length) {
@@ -2271,21 +2439,23 @@ function toggleFullPageBattle() {
   if (btnToggleFullpage) btnToggleFullpage.textContent = fullPageBattle ? "Collapse" : "Expand";
 
   // Resize canvas for full-page mode
-  if (fullPageBattle) {
-    const wrap = document.querySelector(".arena-canvas-wrap");
-    if (wrap) {
-      canvasEl.width = wrap.clientWidth - 20;
-      canvasEl.height = wrap.clientHeight - 20;
+  requestAnimationFrame(() => {
+    if (fullPageBattle) {
+      const wrap = document.querySelector(".arena-canvas-wrap");
+      if (wrap) {
+        canvasEl.width = Math.max(400, wrap.clientWidth - 32);
+        canvasEl.height = Math.max(400, wrap.clientHeight - 32);
+      }
+    } else {
+      canvasEl.width = 400;
+      canvasEl.height = 400;
     }
-  } else {
-    canvasEl.width = 400;
-    canvasEl.height = 400;
-  }
 
-  // Redraw current frame
-  if (replayData && replayData[replayFrameIndex]) {
-    drawFrame(replayData[replayFrameIndex], replayLabels);
-  }
+    // Redraw current frame
+    if (replayData && replayData[replayFrameIndex]) {
+      drawFrame(replayData[replayFrameIndex], replayLabels);
+    }
+  });
 }
 
 function toggleDecisionTraces() {
@@ -2325,6 +2495,9 @@ document.addEventListener("keydown", (e) => {
 // Wire Arena toggles
 btnToggleTraces?.addEventListener("click", toggleDecisionTraces);
 btnToggleFullpage?.addEventListener("click", toggleFullPageBattle);
+
+// Wire match-live exit button
+btnExitMatchLive?.addEventListener("click", exitMatchLive);
 
 // ============================================================================
 // Bot Entry Helper (unified access: preset OR user library)
@@ -2393,6 +2566,9 @@ function setView(name) {
   currentView = name;
   document.body.dataset.view = name;
 
+  // Exit match-live mode if switching away from workspace views
+  if (name === "library" && matchLiveMode) exitMatchLive();
+
   // Top nav tabs
   document.querySelectorAll(".view-tab").forEach((btn) => {
     const active = btn.dataset.view === name;
@@ -2449,7 +2625,18 @@ document.querySelectorAll(".view-tab").forEach((btn) => {
 });
 
 window.addEventListener("resize", () => {
-  if (currentView === "arena") resizeArenaCanvasForCurrentView();
+  if (matchLiveMode) {
+    const wrap = document.querySelector(".arena-canvas-wrap");
+    if (wrap) {
+      canvasEl.width = Math.max(400, wrap.clientWidth - 32);
+      canvasEl.height = Math.max(400, wrap.clientHeight - 32);
+    }
+    if (replayData && replayData[replayFrameIndex]) {
+      drawFrame(replayData[replayFrameIndex], replayLabels);
+    }
+  } else if (currentView === "arena") {
+    resizeArenaCanvasForCurrentView();
+  }
 });
 
 // ============================================================================

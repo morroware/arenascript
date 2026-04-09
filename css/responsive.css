@@ -1,0 +1,107 @@
+/* ============================================================================
+   Responsive — Media Queries & Adaptive Layout
+   ============================================================================ */
+
+@media (max-width: 1000px) {
+  .sidebar {
+    width: 52px;
+    min-width: 52px;
+  }
+  .bot-preset-info {
+    display: none;
+  }
+  .bot-preset {
+    justify-content: center;
+    padding: 10px 0;
+  }
+  .sidebar-header {
+    display: none;
+  }
+  .sidebar-section {
+    display: none;
+  }
+  .arena-pane {
+    width: 320px;
+    min-width: 240px;
+  }
+  .shortcut-hint {
+    display: none;
+  }
+  .view-tabs {
+    margin-left: 8px;
+  }
+  .view-tab {
+    padding: 5px 8px;
+    font-size: 11px;
+  }
+  .view-tab .tab-icon {
+    display: none;
+  }
+  .library-header {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-layout {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    min-width: unset;
+    flex-direction: row;
+    height: 50px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-header, .sidebar-section {
+    display: none;
+  }
+  .bot-preset-info {
+    display: none;
+  }
+  .workspace {
+    flex-direction: column;
+  }
+  .editor-pane {
+    border-right: none;
+    min-height: 200px;
+  }
+  .arena-pane {
+    width: 100%;
+    min-width: unset;
+    height: 320px;
+  }
+  .shortcut-hint {
+    display: none;
+  }
+  .btn-compile-run {
+    display: none;
+  }
+  .view-content-library {
+    padding: 16px;
+  }
+  .library-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Modal responsive ---- */
+
+@media (max-width: 600px) {
+  .tb-modal-body {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .tb-vs {
+    width: auto;
+    height: 32px;
+    font-size: 14px;
+  }
+  .tb-modal {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 32px);
+  }
+}

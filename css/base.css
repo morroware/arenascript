@@ -1,0 +1,125 @@
+/* ============================================================================
+   Base — Reset, CSS Variables, Typography, Scrollbars
+   ============================================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* ---- Surface Colors ---- */
+  --bg-primary: #08080f;
+  --bg-secondary: #10101c;
+  --bg-tertiary: #161625;
+  --bg-panel: #0b0b15;
+  --bg-elevated: #1a1a2f;
+  --bg-glass: rgba(16, 16, 28, 0.85);
+
+  /* ---- Border & Dividers ---- */
+  --border: rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.03);
+  --border-focus: var(--accent-cyan);
+  --border-glow: rgba(0, 212, 255, 0.2);
+
+  /* ---- Text ---- */
+  --text-primary: #e8e8f0;
+  --text-secondary: #8a8aaa;
+  --text-muted: #4a4a6a;
+  --text-bright: #ffffff;
+
+  /* ---- Accent Colors ---- */
+  --accent-cyan: #00d4ff;
+  --accent-cyan-dim: rgba(0, 212, 255, 0.15);
+  --accent-green: #00ff88;
+  --accent-green-dim: rgba(0, 255, 136, 0.12);
+  --accent-orange: #ff8800;
+  --accent-orange-dim: rgba(255, 136, 0, 0.12);
+  --accent-red: #ff3355;
+  --accent-red-dim: rgba(255, 51, 85, 0.12);
+  --accent-purple: #aa55ff;
+  --accent-purple-dim: rgba(170, 85, 255, 0.12);
+  --accent-yellow: #ffdd00;
+  --accent-yellow-dim: rgba(255, 221, 0, 0.12);
+
+  /* ---- Gradients ---- */
+  --gradient-cyan: linear-gradient(135deg, #00d4ff, #0088cc);
+  --gradient-green: linear-gradient(135deg, #00ff88, #00cc6a);
+  --gradient-purple: linear-gradient(135deg, #aa55ff, #7733cc);
+  --gradient-red: linear-gradient(135deg, #ff3355, #cc2244);
+  --gradient-surface: linear-gradient(180deg, var(--bg-secondary), var(--bg-primary));
+  --gradient-glow: radial-gradient(ellipse at 50% 0%, rgba(0, 212, 255, 0.08) 0%, transparent 70%);
+
+  /* ---- Fonts ---- */
+  --font-mono: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace;
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+
+  /* ---- Radii ---- */
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 100px;
+
+  /* ---- Shadows ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-glow-cyan: 0 0 20px rgba(0, 212, 255, 0.15), 0 0 60px rgba(0, 212, 255, 0.05);
+  --shadow-glow-green: 0 0 20px rgba(0, 255, 136, 0.15);
+  --shadow-glow-red: 0 0 20px rgba(255, 51, 85, 0.15);
+
+  /* ---- Editor ---- */
+  --editor-font-size: 13px;
+  --editor-line-height: 1.6;
+  --editor-padding: 16px;
+
+  /* ---- Transitions ---- */
+  --transition-fast: 0.12s ease;
+  --transition-med: 0.25s ease;
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- Selection ---- */
+::selection {
+  background: rgba(0, 212, 255, 0.25);
+  color: var(--text-bright);
+}
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* ---- Focus ring ---- */
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
