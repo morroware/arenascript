@@ -1,0 +1,311 @@
+/* ============================================================================
+   Match Live Mode — Arena Dominance During Active Matches
+   ============================================================================
+   When body.match-live is set, the arena expands to dominate the viewport.
+   The editor slides away, the sidebar compresses, and the canvas becomes
+   the centerpiece with cinematic effects.
+   ============================================================================ */
+
+/* ---- Transition Setup (always present for smooth toggling) ---- */
+
+.editor-pane,
+.arena-pane,
+.sidebar,
+.console-pane,
+.resize-handle,
+.editor-toolbar {
+  transition:
+    width var(--transition-slow),
+    flex var(--transition-slow),
+    opacity var(--transition-slow),
+    transform var(--transition-slow),
+    height var(--transition-slow);
+}
+
+/* ---- Match Live: Core Layout ---- */
+
+body.match-live .editor-pane {
+  flex: 0 0 0px;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.match-live .resize-handle {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.match-live .editor-toolbar {
+  opacity: 0;
+  pointer-events: none;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body.match-live .arena-pane {
+  flex: 1 1 100%;
+  width: 100% !important;
+  min-width: 0;
+}
+
+body.match-live .sidebar {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  border-right: none;
+  pointer-events: none;
+}
+
+body.match-live .console-pane {
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  border-top: none;
+}
+
+/* ---- Match Live: Top Bar Transformation ---- */
+
+body.match-live .top-bar {
+  background: rgba(8, 8, 15, 0.95);
+  backdrop-filter: blur(12px);
+}
+
+body.match-live .top-bar-actions .shortcut-hint {
+  opacity: 0;
+  width: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* ---- Match Live: Arena Canvas Enhancement ---- */
+
+body.match-live .arena-canvas-wrap {
+  flex: 1;
+  padding: 16px;
+  background: var(--bg-primary);
+  position: relative;
+}
+
+body.match-live #arena-canvas {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: var(--radius-xl);
+}
+
+/* ---- Match Live: Arena Header Overlay ---- */
+
+body.match-live .arena-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  background: linear-gradient(180deg, rgba(8, 8, 15, 0.9), transparent);
+  border-bottom: none;
+  padding: 12px 20px;
+}
+
+body.match-live .arena-header .label {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--accent-cyan);
+}
+
+body.match-live #arena-status {
+  background: rgba(0, 212, 255, 0.1);
+  border-color: rgba(0, 212, 255, 0.2);
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+/* ---- Match Live: Replay Controls Enhancement ---- */
+
+body.match-live .replay-controls {
+  background: rgba(10, 10, 20, 0.95);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(0, 212, 255, 0.08);
+  padding: 10px 20px;
+}
+
+/* ---- Match Live: Match Results Overlay ---- */
+
+body.match-live .match-results {
+  position: absolute;
+  bottom: 60px;
+  right: 20px;
+  width: 340px;
+  z-index: 10;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-lg);
+  animation: results-slide-in 0.4s ease-out;
+}
+
+@keyframes results-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ---- Match Live: Exit Button ---- */
+
+.match-live-exit {
+  display: none;
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 100;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-pill);
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  letter-spacing: 0.5px;
+}
+
+body.match-live .match-live-exit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  animation: fade-in-down 0.4s ease-out 0.2s both;
+}
+
+.match-live-exit:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  background: rgba(0, 212, 255, 0.08);
+}
+
+@keyframes fade-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Match Live: Scoreboard Overlay ---- */
+
+.match-scoreboard {
+  display: none;
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  padding: 6px 20px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 1px;
+  white-space: nowrap;
+  box-shadow: var(--shadow-md);
+}
+
+body.match-live .match-scoreboard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: fade-in-down 0.3s ease-out 0.1s both;
+}
+
+.scoreboard-team {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scoreboard-team-0 { color: var(--accent-cyan); }
+.scoreboard-team-1 { color: var(--accent-red); }
+
+.scoreboard-vs {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+
+.scoreboard-tick {
+  color: var(--text-muted);
+  font-size: 10px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ============================================================================
+   Full-page Battle Mode (legacy expand button)
+   ============================================================================ */
+
+body.fullpage-battle .sidebar,
+body.fullpage-battle .editor-pane,
+body.fullpage-battle .resize-handle,
+body.fullpage-battle .console-pane,
+body.fullpage-battle .editor-toolbar {
+  display: none !important;
+}
+
+body.fullpage-battle .arena-pane {
+  width: 100% !important;
+  flex: 1 !important;
+  min-width: unset !important;
+}
+
+body.fullpage-battle .workspace {
+  flex: 1;
+}
+
+body.fullpage-battle .arena-canvas-wrap {
+  flex: 1;
+}
+
+body.fullpage-battle #arena-canvas {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+}
+
+body.fullpage-battle .match-results {
+  position: absolute;
+  bottom: 60px;
+  right: 20px;
+  width: 340px;
+  z-index: 10;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-lg);
+}
