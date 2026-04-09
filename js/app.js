@@ -1360,40 +1360,56 @@ let currentArenaLayout = {
 };
 
 function canvasScale() {
-  return canvasEl.width / ARENA_WIDTH;
+  return Math.min(canvasEl.width / ARENA_WIDTH, canvasEl.height / ARENA_HEIGHT);
+}
+
+function arenaOffsetX() {
+  return (canvasEl.width - ARENA_WIDTH * canvasScale()) / 2;
+}
+
+function arenaOffsetY() {
+  return (canvasEl.height - ARENA_HEIGHT * canvasScale()) / 2;
 }
 
 function drawArenaBackground() {
   const w = canvasEl.width;
   const h = canvasEl.height;
   const s = canvasScale();
+  const ox = arenaOffsetX();
+  const oy = arenaOffsetY();
+  const arenaW = ARENA_WIDTH * s;
+  const arenaH = ARENA_HEIGHT * s;
 
-  // Deep dark background with subtle radial gradient
+  // Full-canvas dark background
   ctx.fillStyle = "#050510";
   ctx.fillRect(0, 0, w, h);
 
-  // Radial gradient center glow
-  const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.7);
+  // Radial gradient center glow (centered on arena)
+  const grad = ctx.createRadialGradient(ox + arenaW / 2, oy + arenaH / 2, 0, ox + arenaW / 2, oy + arenaH / 2, arenaW * 0.7);
   grad.addColorStop(0, "rgba(0, 212, 255, 0.03)");
   grad.addColorStop(0.5, "rgba(0, 100, 180, 0.015)");
   grad.addColorStop(1, "transparent");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 
+  // Translate to arena origin for all arena-local drawing
+  ctx.save();
+  ctx.translate(ox, oy);
+
   // Grid - finer, more subtle
   const step = 10 * s;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.025)";
   ctx.lineWidth = 0.5;
-  for (let x = 0; x <= w; x += step) {
+  for (let x = 0; x <= arenaW; x += step) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
+    ctx.lineTo(x, arenaH);
     ctx.stroke();
   }
-  for (let y = 0; y <= h; y += step) {
+  for (let y = 0; y <= arenaH; y += step) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
+    ctx.lineTo(arenaW, y);
     ctx.stroke();
   }
 
@@ -1401,23 +1417,23 @@ function drawArenaBackground() {
   const majorStep = 50 * s;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
   ctx.lineWidth = 1;
-  for (let x = 0; x <= w; x += majorStep) {
+  for (let x = 0; x <= arenaW; x += majorStep) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
+    ctx.lineTo(x, arenaH);
     ctx.stroke();
   }
-  for (let y = 0; y <= h; y += majorStep) {
+  for (let y = 0; y <= arenaH; y += majorStep) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
+    ctx.lineTo(arenaW, y);
     ctx.stroke();
   }
 
   // Border with subtle glow
   ctx.strokeStyle = "rgba(0, 212, 255, 0.08)";
   ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, w - 2, h - 2);
+  ctx.strokeRect(1, 1, arenaW - 2, arenaH - 2);
 
   // Corner accents
   const cornerLen = 20 * s;
@@ -1426,11 +1442,11 @@ function drawArenaBackground() {
   // Top-left
   ctx.beginPath(); ctx.moveTo(1, cornerLen); ctx.lineTo(1, 1); ctx.lineTo(cornerLen, 1); ctx.stroke();
   // Top-right
-  ctx.beginPath(); ctx.moveTo(w - cornerLen, 1); ctx.lineTo(w - 1, 1); ctx.lineTo(w - 1, cornerLen); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(arenaW - cornerLen, 1); ctx.lineTo(arenaW - 1, 1); ctx.lineTo(arenaW - 1, cornerLen); ctx.stroke();
   // Bottom-left
-  ctx.beginPath(); ctx.moveTo(1, h - cornerLen); ctx.lineTo(1, h - 1); ctx.lineTo(cornerLen, h - 1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(1, arenaH - cornerLen); ctx.lineTo(1, arenaH - 1); ctx.lineTo(cornerLen, arenaH - 1); ctx.stroke();
   // Bottom-right
-  ctx.beginPath(); ctx.moveTo(w - cornerLen, h - 1); ctx.lineTo(w - 1, h - 1); ctx.lineTo(w - 1, h - cornerLen); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(arenaW - cornerLen, arenaH - 1); ctx.lineTo(arenaW - 1, arenaH - 1); ctx.lineTo(arenaW - 1, arenaH - cornerLen); ctx.stroke();
 
   // Hazard zones (draw first, behind everything)
   for (const hz of currentArenaLayout.hazards) {
@@ -1533,6 +1549,8 @@ function drawArenaBackground() {
     ctx.fillStyle = "rgba(255,221,0,0.35)";
     ctx.fillText("CP", cx, cy + 6 * s);
   }
+
+  ctx.restore(); // undo arena-origin translate
 }
 
 function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, isAlive, action, robotClass) {
@@ -1687,6 +1705,10 @@ function drawFrame(frame, labels) {
 
   const s = canvasScale();
 
+  // Translate to arena origin so all entity drawing is properly centered
+  ctx.save();
+  ctx.translate(arenaOffsetX(), arenaOffsetY());
+
   // Draw mines
   if (frame.mines) {
     for (const m of frame.mines) {
@@ -1819,22 +1841,29 @@ function drawFrame(frame, labels) {
       ctx.fillText(text, tx, ty);
     }
   }
+
+  ctx.restore(); // undo arena-origin translate
 }
 
 function drawIdle() {
   drawArenaBackground();
-  const w = canvasEl.width;
-  const h = canvasEl.height;
+  const s = canvasScale();
+  const ox = arenaOffsetX();
+  const oy = arenaOffsetY();
+  const arenaW = ARENA_WIDTH * s;
+  const arenaH = ARENA_HEIGHT * s;
+  const centerX = ox + arenaW / 2;
+  const centerY = oy + arenaH / 2;
 
   // Centered message with subtle styling
   ctx.fillStyle = "rgba(0, 212, 255, 0.15)";
-  ctx.font = `bold ${Math.max(12, w * 0.025)}px sans-serif`;
+  ctx.font = `bold ${Math.max(12, arenaW * 0.04)}px sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("AWAITING COMBATANTS", w / 2, h / 2 - 10);
+  ctx.fillText("AWAITING COMBATANTS", centerX, centerY - 10);
   ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
-  ctx.font = `${Math.max(10, w * 0.018)}px sans-serif`;
-  ctx.fillText("Compile a bot and run a match", w / 2, h / 2 + 14);
+  ctx.font = `${Math.max(10, arenaW * 0.028)}px sans-serif`;
+  ctx.fillText("Compile a bot and run a match", centerX, centerY + 14);
   ctx.textBaseline = "alphabetic";
 }
 
