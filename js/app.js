@@ -1363,40 +1363,65 @@ let currentArenaLayout = {
 };
 
 function canvasScale() {
-  return canvasEl.width / ARENA_WIDTH;
+  // Fit the entire arena within the canvas by using the smaller of the two
+  // axis scales. Previously this returned canvasEl.width / ARENA_WIDTH, which
+  // caused non-square canvases (match-live, fullpage, arena-view) to crop the
+  // bottom of the arena because y * s overflowed canvasEl.height.
+  return Math.min(canvasEl.width / ARENA_WIDTH, canvasEl.height / ARENA_HEIGHT);
+}
+
+function canvasOffset() {
+  // World origin in canvas pixel space. Centers the arena inside the canvas
+  // so non-square canvases letterbox/pillarbox cleanly.
+  const s = canvasScale();
+  return {
+    ox: (canvasEl.width - ARENA_WIDTH * s) / 2,
+    oy: (canvasEl.height - ARENA_HEIGHT * s) / 2,
+  };
 }
 
 function drawArenaBackground() {
   const w = canvasEl.width;
   const h = canvasEl.height;
   const s = canvasScale();
+  const { ox, oy } = canvasOffset();
+  const aw = ARENA_WIDTH * s;
+  const ah = ARENA_HEIGHT * s;
 
-  // Deep dark background with subtle radial gradient
+  // Deep dark background covers the whole canvas (including letterbox bars)
   ctx.fillStyle = "#050510";
   ctx.fillRect(0, 0, w, h);
 
   // Radial gradient center glow
-  const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w * 0.7);
+  const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7);
   grad.addColorStop(0, "rgba(0, 212, 255, 0.03)");
   grad.addColorStop(0.5, "rgba(0, 100, 180, 0.015)");
   grad.addColorStop(1, "transparent");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
 
+  // Translate into arena-local pixel space for the rest of the background
+  ctx.save();
+  ctx.translate(ox, oy);
+
+  // Arena floor fill (slightly lighter so letterbox bars are visibly distinct)
+  ctx.fillStyle = "#06060e";
+  ctx.fillRect(0, 0, aw, ah);
+
   // Grid - finer, more subtle
   const step = 10 * s;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.025)";
   ctx.lineWidth = 0.5;
-  for (let x = 0; x <= w; x += step) {
+  for (let x = 0; x <= aw + 0.01; x += step) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
+    ctx.lineTo(x, ah);
     ctx.stroke();
   }
-  for (let y = 0; y <= h; y += step) {
+  for (let y = 0; y <= ah + 0.01; y += step) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
+    ctx.lineTo(aw, y);
     ctx.stroke();
   }
 
@@ -1404,23 +1429,23 @@ function drawArenaBackground() {
   const majorStep = 50 * s;
   ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
   ctx.lineWidth = 1;
-  for (let x = 0; x <= w; x += majorStep) {
+  for (let x = 0; x <= aw + 0.01; x += majorStep) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
+    ctx.lineTo(x, ah);
     ctx.stroke();
   }
-  for (let y = 0; y <= h; y += majorStep) {
+  for (let y = 0; y <= ah + 0.01; y += majorStep) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
+    ctx.lineTo(aw, y);
     ctx.stroke();
   }
 
   // Border with subtle glow
   ctx.strokeStyle = "rgba(0, 212, 255, 0.08)";
   ctx.lineWidth = 2;
-  ctx.strokeRect(1, 1, w - 2, h - 2);
+  ctx.strokeRect(1, 1, aw - 2, ah - 2);
 
   // Corner accents
   const cornerLen = 20 * s;
@@ -1429,11 +1454,11 @@ function drawArenaBackground() {
   // Top-left
   ctx.beginPath(); ctx.moveTo(1, cornerLen); ctx.lineTo(1, 1); ctx.lineTo(cornerLen, 1); ctx.stroke();
   // Top-right
-  ctx.beginPath(); ctx.moveTo(w - cornerLen, 1); ctx.lineTo(w - 1, 1); ctx.lineTo(w - 1, cornerLen); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(aw - cornerLen, 1); ctx.lineTo(aw - 1, 1); ctx.lineTo(aw - 1, cornerLen); ctx.stroke();
   // Bottom-left
-  ctx.beginPath(); ctx.moveTo(1, h - cornerLen); ctx.lineTo(1, h - 1); ctx.lineTo(cornerLen, h - 1); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(1, ah - cornerLen); ctx.lineTo(1, ah - 1); ctx.lineTo(cornerLen, ah - 1); ctx.stroke();
   // Bottom-right
-  ctx.beginPath(); ctx.moveTo(w - cornerLen, h - 1); ctx.lineTo(w - 1, h - 1); ctx.lineTo(w - 1, h - cornerLen); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(aw - cornerLen, ah - 1); ctx.lineTo(aw - 1, ah - 1); ctx.lineTo(aw - 1, ah - cornerLen); ctx.stroke();
 
   // Hazard zones (draw first, behind everything)
   for (const hz of currentArenaLayout.hazards) {
@@ -1536,6 +1561,8 @@ function drawArenaBackground() {
     ctx.fillStyle = "rgba(255,221,0,0.35)";
     ctx.fillText("CP", cx, cy + 6 * s);
   }
+
+  ctx.restore();
 }
 
 function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, isAlive, action, robotClass) {
@@ -1689,6 +1716,13 @@ function drawFrame(frame, labels) {
   drawArenaBackground();
 
   const s = canvasScale();
+  const { ox, oy } = canvasOffset();
+
+  // Translate into arena-local pixel space so every entity uses (x*s, y*s)
+  // in the centered arena region. Unbalanced ctx.save() is restored at the
+  // end of drawFrame.
+  ctx.save();
+  ctx.translate(ox, oy);
 
   // Draw mines
   if (frame.mines) {
@@ -1822,6 +1856,8 @@ function drawFrame(frame, labels) {
       ctx.fillText(text, tx, ty);
     }
   }
+
+  ctx.restore();
 }
 
 function drawIdle() {
