@@ -10,6 +10,12 @@ import {
 } from "./shared/config.js";
 import { Telemetry } from "./shared/telemetry.js";
 import { computeBookmarks } from "./engine/replay.js";
+import {
+  ARENA_PRESETS,
+  ARENA_PRESET_ORDER,
+  DEFAULT_ARENA_ID,
+  getArenaPreset,
+} from "./engine/arena-presets.js";
 import * as BotLibrary from "./bot-library.js";
 import * as ApiClient from "./api-client.js";
 
@@ -673,6 +679,10 @@ const matchModeSelect = document.getElementById("match-mode");
 const teamPresetSelect = document.getElementById("team-preset-select");
 const btnRunTeamSim = document.getElementById("btn-run-team-sim");
 const seedInput = document.getElementById("seed-input");
+const arenaSelect = document.getElementById("arena-select");
+const arenaInfoEl = document.getElementById("arena-info");
+const arenaInfoTaglineEl = document.getElementById("arena-info-tagline");
+const arenaInfoDescEl = document.getElementById("arena-info-desc");
 const presetButtons = document.querySelectorAll(".bot-preset");
 
 // Replay controls
@@ -739,6 +749,9 @@ let lastReplayBookmarks = null;
 let matchLiveMode = false;
 let matchLiveParticipants = null;
 
+// Currently selected arena preset id (used for next match)
+let currentArenaId = DEFAULT_ARENA_ID;
+
 /** Get seed from UI input, or generate a random one */
 function getMatchSeed() {
   const val = seedInput?.value?.trim();
@@ -748,6 +761,61 @@ function getMatchSeed() {
   }
   return Math.floor(Math.random() * 2147483647);
 }
+
+/** Currently selected arena id (falls back to default if UI not ready). */
+function getMatchArenaId() {
+  if (arenaSelect?.value) return arenaSelect.value;
+  return currentArenaId || DEFAULT_ARENA_ID;
+}
+
+/** Populate the arena selector dropdown and info panel. */
+function initArenaSelect() {
+  if (!arenaSelect) return;
+  arenaSelect.innerHTML = "";
+  for (const id of ARENA_PRESET_ORDER) {
+    const preset = ARENA_PRESETS[id];
+    const opt = document.createElement("option");
+    opt.value = preset.id;
+    opt.textContent = preset.name;
+    if (preset.id === DEFAULT_ARENA_ID) opt.selected = true;
+    arenaSelect.appendChild(opt);
+  }
+  // Append a "random procedural" option at the end for players who want the
+  // legacy generator (surprise factor + anti-memorization practice).
+  const randomOpt = document.createElement("option");
+  randomOpt.value = "random";
+  randomOpt.textContent = "Random (Procedural)";
+  arenaSelect.appendChild(randomOpt);
+
+  arenaSelect.addEventListener("change", () => {
+    currentArenaId = arenaSelect.value;
+    updateArenaInfo();
+    // Re-draw the idle arena to reflect the new preset preview. If a replay
+    // is currently active, we leave the replay frame rendering alone.
+    if (!replayData) drawIdle();
+  });
+  updateArenaInfo();
+}
+
+/** Update the info panel text below the arena selector. */
+function updateArenaInfo() {
+  if (!arenaInfoTaglineEl || !arenaInfoDescEl) return;
+  const id = getMatchArenaId();
+  if (id === "random") {
+    arenaInfoTaglineEl.textContent = "Randomized · Seed-driven";
+    arenaInfoDescEl.textContent =
+      "A freshly generated procedural arena based on the match seed. Useful "
+      + "for practicing against layouts you've never seen before.";
+    return;
+  }
+  const preset = getArenaPreset(id);
+  arenaInfoTaglineEl.textContent = preset.tagline ?? "";
+  arenaInfoDescEl.textContent = preset.description ?? "";
+}
+
+// Preview of the selected arena preset happens inside drawIdle() so a
+// dedicated preview function is not needed — whenever the canvas is idle, it
+// now renders the currently-selected preset's terrain with a name banner.
 
 // ============================================================================
 // Syntax Highlighting
@@ -1175,6 +1243,7 @@ function doRunMatch() {
       maxTicks: 3000,
       tickRate: 30,
       seed: getMatchSeed(),
+      arenaId: getMatchArenaId(),
     },
     participants,
   };
@@ -1197,7 +1266,8 @@ function doRunMatch() {
     result.winner === null ? "DRAW" :
     result.winner === 0 ? "Your Bot" : oppPreset.name;
 
-  logToConsole(`Winner: ${winnerLabel}  |  ${result.reason}  |  ${result.tickCount} ticks  |  seed: ${setup.config.seed}`, "success");
+  const arenaLabel = result.replay?.metadata?.arenaName ?? setup.config.arenaId ?? "unknown";
+  logToConsole(`Winner: ${winnerLabel}  |  ${result.reason}  |  ${result.tickCount} ticks  |  arena: ${arenaLabel}  |  seed: ${setup.config.seed}`, "success");
 
   for (const [id, stats] of result.robotStats) {
     logToConsole(`  ${id}: dmg=${stats.damageDealt}  taken=${stats.damageTaken}  kills=${stats.kills}`, "stat");
@@ -1255,6 +1325,7 @@ function doRunTeamSimulation() {
       maxTicks: 3000,
       tickRate: 30,
       seed: getMatchSeed(),
+      arenaId: getMatchArenaId(),
     },
     participants,
   };
@@ -1314,8 +1385,10 @@ function showMatchResults(result, opponentName) {
     bucket.kills += stats.kills;
   }
 
+  const arenaName = result.replay?.metadata?.arenaName ?? "Unknown Arena";
   resultsContentEl.innerHTML = `
     <div class="result-winner ${isDraw ? 'draw' : ''}">${escapeHtml(winnerLabel)}</div>
+    <div class="result-item"><span class="rl">Arena</span>${escapeHtml(arenaName)}</div>
     <div class="result-item"><span class="rl">Reason</span>${escapeHtml(result.reason.replace(/_/g, ' '))}</div>
     <div class="result-item"><span class="rl">Ticks</span>${result.tickCount}</div>
     <div class="result-item"><span class="rl">Team 0 HP</span>${teamTotals.get(0).hp}</div>
@@ -1354,12 +1427,14 @@ function showMatchResults(result, opponentName) {
 const TEAM_COLORS = ["#00d4ff", "#ff3355"];
 const TEAM_GLOW = ["rgba(0,212,255,0.25)", "rgba(255,51,85,0.25)"];
 const GRID_COLOR = "rgba(42,42,74,0.3)";
-// Dynamic arena layout — populated from replay metadata after each match
+// Dynamic arena layout — populated from replay metadata after each match,
+// or from a selected preset when previewing pre-match.
 let currentArenaLayout = {
   covers: [],
   controlPoints: [],
   healingZones: [],
   hazards: [],
+  depots: [],
 };
 
 function canvasScale() {
@@ -1560,6 +1635,46 @@ function drawArenaBackground() {
     ctx.setLineDash([]);
     ctx.fillStyle = "rgba(255,221,0,0.35)";
     ctx.fillText("CP", cx, cy + 6 * s);
+  }
+
+  // Resupply depots — ammo/vent stations (previously missing from rendering)
+  for (const depot of (currentArenaLayout.depots ?? [])) {
+    const cx = depot.x * s;
+    const cy = depot.y * s;
+    const r = (depot.radius ?? 3) * s;
+
+    // Soft purple glow
+    const depotGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    depotGrad.addColorStop(0, "rgba(180, 120, 255, 0.16)");
+    depotGrad.addColorStop(0.7, "rgba(180, 120, 255, 0.05)");
+    depotGrad.addColorStop(1, "rgba(180, 120, 255, 0)");
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = depotGrad;
+    ctx.fill();
+
+    // Dashed ring
+    ctx.strokeStyle = "rgba(200, 150, 255, 0.35)";
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([3, 2]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Crosshair/ammo icon in the center
+    ctx.strokeStyle = "rgba(220, 180, 255, 0.55)";
+    ctx.lineWidth = 1.2;
+    const ix = Math.max(2, r * 0.5);
+    ctx.beginPath();
+    ctx.moveTo(cx - ix, cy);
+    ctx.lineTo(cx + ix, cy);
+    ctx.moveTo(cx, cy - ix);
+    ctx.lineTo(cx, cy + ix);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(220, 180, 255, 0.6)";
+    ctx.font = `bold ${Math.max(6, 1.5 * s)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText("DEPOT", cx, cy + r + 1.6 * s);
   }
 
   ctx.restore();
@@ -1861,9 +1976,40 @@ function drawFrame(frame, labels) {
 }
 
 function drawIdle() {
+  // When idle, always preview the currently-selected arena preset so players
+  // see exactly what terrain they're about to fight on. For "random", fall back
+  // to an empty grid with a hint (the terrain doesn't exist until match time).
+  const id = getMatchArenaId();
+  if (id && id !== "random") {
+    const preset = getArenaPreset(id);
+    currentArenaLayout = {
+      covers: (preset.covers ?? []).map(c => ({ ...c })),
+      controlPoints: (preset.controlPoints ?? []).map(cp => ({ ...cp })),
+      healingZones: (preset.healingZones ?? []).map(hz => ({ ...hz })),
+      hazards: (preset.hazards ?? []).map(hz => ({ ...hz })),
+      depots: (preset.depots ?? []).map(d => ({ ...d })),
+    };
+  } else {
+    currentArenaLayout = { covers: [], controlPoints: [], healingZones: [], hazards: [], depots: [] };
+  }
+
   drawArenaBackground();
   const w = canvasEl.width;
   const h = canvasEl.height;
+
+  // Arena name label (top)
+  if (id && id !== "random") {
+    const preset = getArenaPreset(id);
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+    ctx.font = `bold ${Math.max(12, w * 0.028)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(preset.name.toUpperCase(), w / 2, 22);
+    ctx.fillStyle = "rgba(0, 212, 255, 0.5)";
+    ctx.font = `${Math.max(9, w * 0.016)}px sans-serif`;
+    ctx.fillText(preset.tagline ?? "", w / 2, 38);
+    ctx.restore();
+  }
 
   // Centered message with subtle styling
   ctx.fillStyle = "rgba(0, 212, 255, 0.15)";
@@ -2453,6 +2599,7 @@ function tbRunBattle() {
     config: {
       mode, arenaWidth: ARENA_WIDTH, arenaHeight: ARENA_HEIGHT,
       maxTicks: 3000, tickRate: 30, seed: getMatchSeed(),
+      arenaId: getMatchArenaId(),
     },
     participants,
   };
@@ -3251,6 +3398,7 @@ renderSidebarUserBots();
 updateAuthModeUi();
 refreshCurrentUser().catch(() => {});
 loadPreset("bruiser");
+initArenaSelect();
 drawIdle();
 updateEditorFileName();
 updateArenaLoadedBotLabel();

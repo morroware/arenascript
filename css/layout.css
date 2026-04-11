@@ -329,6 +329,31 @@
   margin-top: 8px;
 }
 
+/* ---- Arena Info Panel (below arena selector) ---- */
+.arena-info {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 212, 255, 0.04);
+  border: 1px solid rgba(0, 212, 255, 0.15);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+}
+
+.arena-info-tagline {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent-cyan);
+  margin-bottom: 4px;
+}
+
+.arena-info-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
 .sidebar-user-bots {
   display: flex;
   flex-direction: column;

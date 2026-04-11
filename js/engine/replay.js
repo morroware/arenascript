@@ -10,6 +10,8 @@ export class ReplayWriter {
   #seed;
   #participants;
   #arenaLayout = null;
+  #arenaId = null;
+  #arenaName = null;
 
   constructor(matchId, seed, participants) {
     this.#matchId = matchId;
@@ -85,6 +87,12 @@ export class ReplayWriter {
     this.#frames.push(frame);
   }
 
+  /** Store arena preset identity for display/replay metadata. */
+  setArenaIdentity(id, name) {
+    this.#arenaId = id ?? null;
+    this.#arenaName = name ?? null;
+  }
+
   /** Store arena layout for rendering */
   captureArenaLayout(world) {
     this.#arenaLayout = {
@@ -117,6 +125,8 @@ export class ReplayWriter {
         tickCount: this.#frames.length,
         participants: this.#participants,
         arenaLayout: this.#arenaLayout ?? null,
+        arenaId: this.#arenaId,
+        arenaName: this.#arenaName,
       },
       frames: this.#frames,
     };
