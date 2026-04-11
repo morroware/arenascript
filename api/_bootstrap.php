@@ -69,10 +69,13 @@ function as_bootstrap(): void
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
 
-    // Permissive CORS is appropriate for a single-page app shipped alongside
-    // the API. If the backend is ever hosted on a different origin, lock this
-    // down to an allowlist instead.
-    header('Access-Control-Allow-Origin: *');
+    // CORS: default to permissive in local/dev, allow explicit allowlist in prod
+    // via ARENA_CORS_ORIGIN (single origin) or ARENA_CORS_ORIGIN="*" .
+    $cors = getenv('ARENA_CORS_ORIGIN');
+    if ($cors === false || $cors === '') {
+        $cors = '*';
+    }
+    header('Access-Control-Allow-Origin: ' . $cors);
     header('Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, X-Arena-Player');
     header('Access-Control-Max-Age: 600');
@@ -120,6 +123,30 @@ function as_bootstrap(): void
         }
     }
     $GLOBALS['AS_REQUEST_BODY'] = $body ?? [];
+}
+
+/**
+ * Basic fixed-window rate limiter backed by JsonStore.
+ * Returns true when allowed, false when limit exceeded.
+ */
+function as_rate_limit(string $bucket, int $maxRequests, int $windowSeconds): bool
+{
+    if ($maxRequests <= 0 || $windowSeconds <= 0) {
+        return true;
+    }
+    $now = time();
+    $window = intdiv($now, $windowSeconds);
+    $key = $bucket . ':' . $window;
+    $store = new JsonStore('ratelimits');
+
+    return $store->mutate(function (array $state) use ($key, $maxRequests, $now): array {
+        $state[$key] ??= ['count' => 0, 'updatedAt' => $now];
+        $state[$key]['count'] = (int) ($state[$key]['count'] ?? 0) + 1;
+        $state[$key]['updatedAt'] = $now;
+
+        $allowed = $state[$key]['count'] <= $maxRequests;
+        return [$state, $allowed];
+    });
 }
 
 /** @return array<string, mixed> */

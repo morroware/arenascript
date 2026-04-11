@@ -195,3 +195,88 @@ in the current round has been reported.
   browsers won't send cross-origin without a CORS preflight, which gives
   basic CSRF resistance. Tighten the CORS allowlist in `_bootstrap.php` if
   you host the API on a different origin than the frontend.
+
+## MySQL + Account APIs (`/api/v1/*`)
+
+A new MySQL-backed API foundation is available for real multi-user accounts and saved bots.
+
+### Environment variables
+
+Set these before using `/api/v1/*` endpoints:
+
+- `ARENA_DB_ENABLED=1`
+- `ARENA_DB_HOST=127.0.0.1`
+- `ARENA_DB_PORT=3306`
+- `ARENA_DB_NAME=arenascript`
+- `ARENA_DB_USER=...`
+- `ARENA_DB_PASS=...`
+- `ARENA_SESSION_TTL_HOURS=336` (optional)
+
+### Migration
+
+Apply the schema in:
+
+- `api/migrations/001_mysql_core.sql`
+
+### Auth endpoints
+
+- `POST /api/v1/auth/register` `{ email, username, password }`
+- `POST /api/v1/auth/login` `{ identity, password }`
+- `POST /api/v1/auth/logout` (requires `Authorization: Bearer <token>`)
+- `GET /api/v1/auth/me` (requires bearer token)
+
+### Bots endpoints
+
+- `GET /api/v1/bots/index.php`
+- `POST /api/v1/bots/index.php`
+- `GET /api/v1/bots/versions.php?botId=<id>`
+- `POST /api/v1/bots/versions.php?botId=<id>`
+
+### Admin endpoints
+
+- `GET /api/v1/admin/users.php` (admin role)
+- `POST /api/v1/admin/suspend-user.php` (admin role)
+
+### Competitive migrations
+
+Also apply:
+
+- `api/migrations/002_competitive_core.sql`
+
+### Additional v1 endpoints
+
+- `GET /api/v1/leaderboard.php?queue=1v1_ranked&limit=100`
+- `POST /api/v1/matches/report.php`
+- `GET /api/v1/lobbies/index.php`
+- `POST /api/v1/lobbies/index.php` with `{ action: "create" | "join", ... }`
+- `DELETE /api/v1/lobbies/index.php` with `{ lobbyId }`
+
+## Easy shared-hosting install (`api/install.php`)
+
+For cPanel/shared hosting, use the installer:
+
+1. Create a MySQL database + DB user from cPanel.
+2. Open `https://your-domain/api/install.php`.
+3. Enter DB credentials + first admin account and submit.
+4. Installer will:
+   - run migrations `001_mysql_core.sql` and `002_competitive_core.sql`,
+   - create/update the admin user,
+   - write `api/.env.local`,
+   - create `api/.installed.lock` to prevent accidental re-runs.
+
+**Important security step:** after successful install, remove or restrict `api/install.php`.
+
+### Beta hardening checklist
+
+- Set `ARENA_CORS_ORIGIN=https://your-frontend-domain.example` in production.
+- Keep `ARENA_ALLOW_INSTALLER` unset in production (set to `1` only temporarily during install).
+- Keep installer locked (`api/.installed.lock`) and remove `api/install.php` after setup.
+- Login/register and match-report endpoints include fixed-window IP rate limits; keep external WAF/rate limiting enabled too.
+
+### Quick automated checks
+
+Run:
+
+```bash
+./scripts/check_beta_readiness.sh
+```
