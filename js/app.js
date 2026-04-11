@@ -11,8 +11,11 @@ import {
 import { Telemetry } from "./shared/telemetry.js";
 import { computeBookmarks } from "./engine/replay.js";
 import * as BotLibrary from "./bot-library.js";
+import * as ApiClient from "./api-client.js";
 
 const telemetry = Telemetry.instance();
+let currentUser = null;
+let currentEditorRemoteBotId = null;
 
 // ============================================================================
 // Example Bot Source Code
@@ -2095,6 +2098,16 @@ function loadPreset(key) {
   currentPreset = key;
   currentEditorBotName = preset.name;
   currentEditorUserBotId = key.startsWith("user_") ? key : null;
+  currentEditorRemoteBotId = null;
+  if (currentEditorUserBotId) {
+    const map = getRemoteBotMap();
+    for (const [remoteId, localId] of Object.entries(map)) {
+      if (localId === currentEditorUserBotId) {
+        currentEditorRemoteBotId = remoteId;
+        break;
+      }
+    }
+  }
 
   presetButtons.forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.bot === key);
@@ -2678,12 +2691,178 @@ function refreshOpponentSelect() {
 }
 
 // ============================================================================
+// Auth / Account UI
+// ============================================================================
+
+const authStatusEl = document.getElementById("auth-status");
+const btnAuthOpen = document.getElementById("btn-auth-open");
+const btnAuthLogout = document.getElementById("btn-auth-logout");
+const btnSyncCloud = document.getElementById("btn-sync-cloud");
+const authModal = document.getElementById("auth-modal");
+const btnCloseAuth = document.getElementById("btn-close-auth");
+const authModeEl = document.getElementById("auth-mode");
+const authIdentityEl = document.getElementById("auth-identity");
+const authEmailWrap = document.getElementById("auth-email-wrap");
+const authUsernameWrap = document.getElementById("auth-username-wrap");
+const authEmailEl = document.getElementById("auth-email");
+const authUsernameEl = document.getElementById("auth-username");
+const authPasswordEl = document.getElementById("auth-password");
+const authMessageEl = document.getElementById("auth-message");
+const btnAuthSubmit = document.getElementById("btn-auth-submit");
+const REMOTE_BOT_MAP_KEY = "arenascript.remote.botmap.v1";
+
+function setAuthMessage(text, kind = "info") {
+  if (!authMessageEl) return;
+  authMessageEl.textContent = text;
+  authMessageEl.style.color = kind === "error" ? "#fca5a5" : kind === "success" ? "#86efac" : "";
+}
+
+function getRemoteBotMap() {
+  try {
+    const raw = localStorage.getItem(REMOTE_BOT_MAP_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function setRemoteBotMap(map) {
+  localStorage.setItem(REMOTE_BOT_MAP_KEY, JSON.stringify(map || {}));
+}
+
+function rememberRemoteMapping(remoteId, localId) {
+  if (!remoteId || !localId) return;
+  const map = getRemoteBotMap();
+  map[remoteId] = localId;
+  setRemoteBotMap(map);
+}
+
+function updateAuthUi() {
+  if (currentUser) {
+    if (authStatusEl) authStatusEl.textContent = `@${currentUser.username}`;
+    if (btnAuthOpen) btnAuthOpen.hidden = true;
+    if (btnAuthLogout) btnAuthLogout.hidden = false;
+    if (btnSyncCloud) btnSyncCloud.hidden = false;
+  } else {
+    if (authStatusEl) authStatusEl.textContent = "Guest";
+    if (btnAuthOpen) btnAuthOpen.hidden = false;
+    if (btnAuthLogout) btnAuthLogout.hidden = true;
+    if (btnSyncCloud) btnSyncCloud.hidden = true;
+  }
+}
+
+function openAuthModal() {
+  if (!authModal) return;
+  authModal.hidden = false;
+  setAuthMessage("Use login or create a new account.", "info");
+}
+
+function closeAuthModal() {
+  if (!authModal) return;
+  authModal.hidden = true;
+}
+
+function updateAuthModeUi() {
+  const isRegister = authModeEl?.value === "register";
+  if (authEmailWrap) authEmailWrap.hidden = !isRegister;
+  if (authUsernameWrap) authUsernameWrap.hidden = !isRegister;
+  if (authIdentityEl) authIdentityEl.placeholder = isRegister ? "Optional (email also accepted for login)" : "Email or username";
+}
+
+async function refreshCurrentUser() {
+  if (!ApiClient.hasAuthToken()) {
+    currentUser = null;
+    updateAuthUi();
+    return;
+  }
+  try {
+    const me = await ApiClient.me();
+    currentUser = me.user ?? null;
+  } catch {
+    currentUser = null;
+  }
+  updateAuthUi();
+}
+
+async function syncRemoteBotsIntoLibrary() {
+  if (!currentUser) return;
+  const { bots } = await ApiClient.listRemoteBots();
+  const map = getRemoteBotMap();
+  let imported = 0;
+  for (const rb of bots ?? []) {
+    if (!rb?.id || !rb?.name) continue;
+    const mappedLocalId = map[rb.id];
+    const mappedLocal = mappedLocalId ? BotLibrary.getById(mappedLocalId) : null;
+    const versions = await ApiClient.listRemoteBotVersions(rb.id);
+    const src = versions?.versions?.[0]?.source_code;
+    if (!src) continue;
+    if (mappedLocal) {
+      const updated = BotLibrary.updateBot(mappedLocal.id, src);
+      if (updated.ok) imported++;
+      continue;
+    }
+    const added = BotLibrary.addBot(src, { overrideName: rb.name });
+    if (added.ok) {
+      rememberRemoteMapping(rb.id, added.bot.id);
+      imported++;
+    }
+  }
+  if (imported > 0) {
+    toast(`Synced ${imported} cloud bot${imported > 1 ? "s" : ""}.`, "success");
+  } else {
+    toast("No new cloud bots to sync.", "info");
+  }
+}
+
+btnAuthOpen?.addEventListener("click", openAuthModal);
+btnCloseAuth?.addEventListener("click", closeAuthModal);
+authModeEl?.addEventListener("change", updateAuthModeUi);
+btnAuthLogout?.addEventListener("click", async () => {
+  await ApiClient.logout();
+  currentUser = null;
+  updateAuthUi();
+  toast("Signed out.", "info");
+});
+btnSyncCloud?.addEventListener("click", async () => {
+  try {
+    await syncRemoteBotsIntoLibrary();
+  } catch (e) {
+    toast(`Cloud sync failed: ${e.message ?? String(e)}`, "error");
+  }
+});
+btnAuthSubmit?.addEventListener("click", async () => {
+  try {
+    const mode = authModeEl?.value || "login";
+    if (mode === "register") {
+      const email = authEmailEl?.value?.trim() || "";
+      const username = authUsernameEl?.value?.trim() || "";
+      const password = authPasswordEl?.value || "";
+      const data = await ApiClient.register({ email, username, password });
+      currentUser = data.user;
+      setAuthMessage("Account created successfully.", "success");
+    } else {
+      const identity = authIdentityEl?.value?.trim() || "";
+      const password = authPasswordEl?.value || "";
+      const data = await ApiClient.login({ identity, password });
+      currentUser = data.user;
+      setAuthMessage("Signed in successfully.", "success");
+    }
+    updateAuthUi();
+    setTimeout(closeAuthModal, 250);
+  } catch (e) {
+    setAuthMessage(e.message ?? String(e), "error");
+  }
+});
+
+// ============================================================================
 // Save-to-Library button
 // ============================================================================
 
 const btnSaveLibrary = document.getElementById("btn-save-library");
 
-btnSaveLibrary?.addEventListener("click", () => {
+btnSaveLibrary?.addEventListener("click", async () => {
   const source = editorEl.value;
   if (!source.trim()) {
     toast("Editor is empty.", "warn");
@@ -2698,6 +2877,18 @@ btnSaveLibrary?.addEventListener("click", () => {
       updateEditorFileName();
       toast(`Updated "${r.bot.name}" in library.`, "success");
       logToConsole(`Library: updated "${r.bot.name}".`, "success");
+      if (currentUser && currentEditorRemoteBotId) {
+        try {
+          await ApiClient.createRemoteBotVersion({
+            botId: currentEditorRemoteBotId,
+            sourceCode: source,
+            versionLabel: `v${Date.now()}`,
+          });
+          logToConsole(`Cloud: pushed new version for "${r.bot.name}".`, "event");
+        } catch (e) {
+          logToConsole(`Cloud sync warning: ${e.message ?? String(e)}`, "warn");
+        }
+      }
     } else {
       toast(`Validation failed: ${r.errors[0]}`, "error", 6000);
       logToConsole(`Library save failed: ${r.errors.join("; ")}`, "error");
@@ -2713,6 +2904,22 @@ btnSaveLibrary?.addEventListener("click", () => {
     updateEditorFileName();
     toast(`Saved "${r.bot.name}" to library.`, "success");
     logToConsole(`Library: saved "${r.bot.name}" (${r.bot.class}).`, "success");
+    if (currentUser) {
+      try {
+        const created = await ApiClient.createRemoteBot({
+          name: r.bot.name,
+          sourceCode: source,
+          versionLabel: "v1",
+        });
+        if (created?.bot?.id) {
+          currentEditorRemoteBotId = created.bot.id;
+          rememberRemoteMapping(created.bot.id, r.bot.id);
+        }
+        logToConsole(`Cloud: saved "${r.bot.name}" to account.`, "event");
+      } catch (e) {
+        logToConsole(`Cloud sync warning: ${e.message ?? String(e)}`, "warn");
+      }
+    }
     if (r.warnings?.length) {
       logToConsole(`Warnings: ${r.warnings.join("; ")}`, "warn");
     }
@@ -2936,6 +3143,7 @@ on tick {
   editorEl.value = template;
   currentEditorBotName = "New Bot";
   currentEditorUserBotId = null;
+  currentEditorRemoteBotId = null;
   currentPreset = "";
   presetButtons.forEach((btn) => btn.classList.remove("active"));
   document.querySelectorAll(".sidebar-user-bot").forEach((el) => el.classList.remove("active"));
@@ -3004,6 +3212,8 @@ BotLibrary.subscribe(() => {
 
 refreshOpponentSelect();
 renderSidebarUserBots();
+updateAuthModeUi();
+refreshCurrentUser().catch(() => {});
 loadPreset("bruiser");
 drawIdle();
 updateEditorFileName();
