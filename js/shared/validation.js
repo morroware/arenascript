@@ -109,6 +109,15 @@ export function validateMatchConfig(config) {
     errors.push("config.seed must be a non-negative integer");
   }
 
+  // arenaId is OPTIONAL. When present, it must be a non-empty string. Unknown
+  // ids are not rejected here — getArenaPreset() falls back to the default, so
+  // replays with stale preset ids still load cleanly.
+  if (config.arenaId !== undefined && config.arenaId !== null) {
+    if (typeof config.arenaId !== "string" || config.arenaId.length === 0) {
+      errors.push("config.arenaId must be a non-empty string when provided");
+    }
+  }
+
   return errors.length > 0 ? { valid: false, errors } : { valid: true };
 }
 

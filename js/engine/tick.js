@@ -10,6 +10,7 @@ import { resolveMovement, applyMovement, resolveCollisions } from "./movement.js
 import { resolveCombat, updateProjectiles, updateCooldowns, applyDamage } from "./combat.js";
 import { VisibilityTracker, checkCooldownReady } from "./events.js";
 import { ReplayWriter } from "./replay.js";
+import { getArenaPreset, isKnownArenaId, DEFAULT_ARENA_ID } from "./arena-presets.js";
 import {
   CAPTURE_RATE, CAPTURE_WIN_THRESHOLD, CAPTURE_RADIUS,
   HEAL_ZONE_RADIUS, HEAL_ZONE_TICK_RATE,
@@ -113,9 +114,15 @@ export function runMatch(setup) {
     }
   }
 
-  // Create replay writer and capture the procedural arena layout
+  // Create replay writer and capture arena identity + layout for rendering
   const matchId = `match_${config.seed}_${++nextMatchSequence}`;
   const replayWriter = new ReplayWriter(matchId, config.seed, matchParticipants);
+  if (config.arenaId === "random") {
+    replayWriter.setArenaIdentity("random", "Random Procedural");
+  } else {
+    const preset = getArenaPreset(config.arenaId);
+    replayWriter.setArenaIdentity(preset.id, preset.name);
+  }
   replayWriter.captureArenaLayout(world);
 
   // Execute spawn handlers
@@ -395,6 +402,55 @@ export function runMatch(setup) {
 }
 
 function initializeArenaLayout(world) {
+  const arenaId = world.config.arenaId;
+
+  // "random" explicitly opts back into the legacy procedural generator. Any
+  // other value (including undefined) uses a hand-crafted preset; unknown ids
+  // fall back to the default preset via getArenaPreset().
+  if (arenaId === "random") {
+    buildProceduralArena(world);
+  } else {
+    const preset = getArenaPreset(arenaId);
+    buildPresetArena(world, preset);
+  }
+}
+
+/**
+ * Build the world from a hand-crafted arena preset. Deterministic — no RNG
+ * usage at all — so two runs with the same preset + seed are identical and
+ * arena selection never destabilizes replays.
+ */
+function buildPresetArena(world, preset) {
+  for (const cp of preset.controlPoints ?? []) {
+    world.addControlPoint(vec2(cp.x, cp.y), cp.radius ?? CAPTURE_RADIUS);
+  }
+  for (const c of preset.covers ?? []) {
+    world.addCover(vec2(c.x, c.y), c.w, c.h, !!c.destructible);
+  }
+  for (const hz of preset.healingZones ?? []) {
+    world.addHealingZone(
+      vec2(hz.x, hz.y),
+      hz.radius ?? HEAL_ZONE_RADIUS,
+      hz.healPerTick ?? HEAL_ZONE_TICK_RATE,
+    );
+  }
+  for (const hz of preset.hazards ?? []) {
+    world.addHazard(
+      vec2(hz.x, hz.y),
+      hz.radius ?? HAZARD_ZONE_RADIUS,
+      hz.damagePerTick ?? HAZARD_DAMAGE_PER_TICK,
+    );
+  }
+  for (const d of preset.depots ?? []) {
+    world.addDepot(vec2(d.x, d.y), d.radius);
+  }
+}
+
+/**
+ * Legacy procedural arena generator. Still exposed via `arenaId: "random"`
+ * for players who want the surprise factor of unseen layouts.
+ */
+function buildProceduralArena(world) {
   const { arenaWidth: w, arenaHeight: h } = world.config;
   const rng = world.rng;
 
