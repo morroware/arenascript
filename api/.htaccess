@@ -1,0 +1,45 @@
+# ============================================================================
+# ArenaScript API — Apache / cPanel protection
+# ----------------------------------------------------------------------------
+# This file hardens the api/ directory on Apache-backed cPanel hosts:
+#   - Blocks direct web access to credential, lock, and storage files
+#   - Blocks access to the migrations/ SQL files
+#   - Disables directory listings
+#   - Sets sensible defaults for PHP endpoints
+# These rules are defense-in-depth: api/.storage and api/.env.local are also
+# created with restrictive permissions by the PHP code, but a misconfigured
+# docroot or backup tool could still expose them without this file.
+# ============================================================================
+
+Options -Indexes
+DirectoryIndex index.php
+
+# Block any dotfile (.env.local, .installed.lock, .storage/*, .htaccess itself)
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# Block explicit credential / state files (redundant with the dotfile rule
+# above, but belt-and-braces in case FilesMatch semantics change).
+<Files ".env.local">
+    Require all denied
+</Files>
+<Files ".installed.lock">
+    Require all denied
+</Files>
+
+# Block SQL migrations from being downloaded
+<FilesMatch "\.sql$">
+    Require all denied
+</FilesMatch>
+
+# Block README / markdown files in this directory
+<FilesMatch "\.(md|markdown)$">
+    Require all denied
+</FilesMatch>
+
+# Ensure PHP files are handled by PHP and not served as plain text if the
+# handler is misconfigured (some cPanel setups drop handlers on subdir moves).
+<FilesMatch "\.php$">
+    SetHandler application/x-httpd-php
+</FilesMatch>

@@ -1,0 +1,2 @@
+# Block direct web access to SQL migration files.
+Require all denied

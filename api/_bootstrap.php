@@ -49,6 +49,17 @@ function as_storage_dir(): string
         // the docroot to serve api/. Web endpoints should never expose this dir.
         @mkdir(AS_STORAGE_DIR, 0700, true);
     }
+    // Defense-in-depth: drop an Apache deny file and an empty index.html so
+    // even if a host serves api/.storage/ directly (e.g. AllowOverride None
+    // on api/.htaccess), the contents can't be walked by a crawler.
+    $htaccess = AS_STORAGE_DIR . '/.htaccess';
+    if (!is_file($htaccess)) {
+        @file_put_contents($htaccess, "Require all denied\nOrder allow,deny\nDeny from all\n");
+    }
+    $index = AS_STORAGE_DIR . '/index.html';
+    if (!is_file($index)) {
+        @file_put_contents($index, '');
+    }
     return AS_STORAGE_DIR;
 }
 

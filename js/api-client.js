@@ -1,4 +1,9 @@
-const API_BASE = "/api/v1";
+// Resolve the API base URL relative to this module's location so that the
+// project works when hosted in a subdirectory (e.g. on cPanel shared hosting).
+// This file lives at <app>/js/api-client.js, so the API is one level up at
+// <app>/api/v1/. Using `import.meta.url` as the base gives us the correct
+// absolute URL regardless of where the app is deployed.
+const API_BASE = new URL("../api/v1", import.meta.url).href.replace(/\/+$/, "");
 const TOKEN_KEY = "arenascript.auth.token";
 
 function getToken() {
