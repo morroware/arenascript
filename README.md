@@ -253,6 +253,47 @@ The backend provides REST endpoints for multiplayer features:
 | `api/match-runner.php` | Execute matches server-side and store results |
 | `api/lobby.php` | Create/join lobbies, supports 1v1, 2v2, and FFA modes |
 
+## Deployment
+
+### cPanel / Shared Hosting
+
+ArenaScript is designed to drop straight into a cPanel `public_html` directory,
+including into a **subdirectory** such as `public_html/arenascript/`.
+
+1. Upload the project contents into the target directory (root or subdirectory).
+2. Ensure the host runs **PHP 8.1 or newer** (uses `strict_types`, `mixed`,
+   `never` return types, Argon2id password hashing).
+3. In cPanel, create a MySQL database + user and grant the user full
+   privileges on that database.
+4. Visit `api/install.php` in a browser (locally, or after temporarily setting
+   `ARENA_ALLOW_INSTALLER=1` in the host's environment). Fill in the DB
+   credentials and the admin account — the installer writes `api/.env.local`,
+   runs the migrations, and creates the admin user.
+5. **Delete `api/install.php`** after a successful install. The installer
+   self-locks via `api/.installed.lock`, but removing the file entirely is
+   safer.
+6. Confirm the app loads and that you can sign in. API calls resolve their
+   base URL dynamically from the module location (`import.meta.url`), so the
+   app will work whether it's at `https://example.com/` or
+   `https://example.com/arenascript/`.
+
+The shipped `api/.htaccess` blocks direct web access to `.env.local`,
+`.installed.lock`, `.storage/`, and `.sql` migration files. If your host
+runs `AllowOverride None`, the PHP bootstrap also drops a secondary
+`.htaccess` and an empty `index.html` into `api/.storage/` at runtime as
+defense in depth.
+
+### Production Hardening Checklist
+
+Before opening beta to real users:
+
+- [ ] Set `ARENA_CORS_ORIGIN` to your real origin (e.g.
+      `https://arena.example.com`). The default `*` is only safe for local dev.
+- [ ] Set `ARENA_DB_ENABLED=1` and confirm DB credentials are populated.
+- [ ] Delete `api/install.php` after first-time setup.
+- [ ] Force HTTPS at the web server or in cPanel (Let's Encrypt + redirect).
+- [ ] Verify `api/.env.local` is mode 0600 (`chmod 600 api/.env.local`).
+
 ## License
 
 All rights reserved.
