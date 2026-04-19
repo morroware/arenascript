@@ -318,6 +318,390 @@ function scoreMatch(cmd, query) {
   return 0;
 }
 
+// --- Onboarding tour --------------------------------------------------------
+//
+// A simple step-through modal that runs on the user's first visit (and on
+// demand via the Tour button). Each step is just markup; we don't try to
+// pin hotspots over live UI because the layout shifts between views and it
+// becomes a maintenance nightmare. Instead the tour text tells the user
+// exactly where each feature lives ("top-right", "sidebar", etc.) and the
+// final step highlights the Rookie preset as the obvious next action.
+
+const ONBOARDING_KEY = "arenascript.onboarded.v1";
+
+const ONBOARDING_STEPS = [
+  {
+    title: "Welcome to ArenaScript",
+    body: `
+      <p>ArenaScript is a deterministic robot-combat playground. You write a tiny program in a custom language, we compile it to bytecode, and two teams of bots fight a reproducible match you can scrub through like a film reel.</p>
+      <p>This tour takes about a minute. You can re-open it anytime from the <b>Tour</b> button in the top bar.</p>`,
+  },
+  {
+    title: "The Editor",
+    body: `
+      <p>The left panel is a syntax-highlighted code editor with autocomplete (start typing any sensor name and a suggestion list appears). It shows inline error squiggles when you compile, and the <b>Console</b> at the bottom prints diagnostics, match results, and anything your bot emits via <code>log(...)</code>.</p>
+      <p>Useful keys: <kbd>Ctrl</kbd>+<kbd>Enter</kbd> compile, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> compile &amp; run, <kbd>Tab</kbd> indent.</p>`,
+  },
+  {
+    title: "The Arena",
+    body: `
+      <p>The right panel renders the match. Pick an opponent and an arena from the sidebar (switch to the <b>Arena</b> tab), then hit <b>Run Match</b>. Matches are deterministic for a given seed — change the seed to vary the fight.</p>
+      <p>After a match finishes you get a scrubber, step-back/step-forward buttons, bookmarks for first-damage and first-kill, and variable-speed playback.</p>`,
+  },
+  {
+    title: "Tutorial bots",
+    body: `
+      <p>Open the sidebar <b>Start Here · Tutorial</b> section and step through <b>Rookie</b> → <b>Scout</b> → <b>Predator</b>. Each is heavily commented and demonstrates one major concept (basic loop, state + logging, full predictive combat).</p>
+      <p>Press <kbd>Ctrl</kbd>+<kbd>/</kbd> to open the full language reference, or <kbd>Ctrl</kbd>+<kbd>K</kbd> for the command palette (fuzzy-search everything).</p>`,
+  },
+  {
+    title: "Save your work",
+    body: `
+      <p>The <b>Save to Library</b> button stores your compiled bot to the browser-local library. The <b>My Bots</b> tab lists every saved bot; you can upload <code>.arena</code> files or sync them to the cloud if you sign in.</p>
+      <p>That's it! Click <b>Get Started</b> to load the Rookie tutorial bot — a 12-line starter that's the cleanest example of the full program shape.</p>`,
+    action: { label: "Get Started", bot: "rookie" },
+  },
+];
+
+export function installOnboarding({ loadBot } = {}) {
+  const modal = document.getElementById("onboarding-modal");
+  const stepsEl = document.getElementById("onboarding-steps");
+  const titleEl = document.getElementById("onboarding-title");
+  const progressEl = document.getElementById("onboarding-progress");
+  const prevBtn = document.getElementById("btn-onboarding-prev");
+  const nextBtn = document.getElementById("btn-onboarding-next");
+  const skipBtn = document.getElementById("btn-onboarding-skip");
+  const closeBtn = document.getElementById("btn-close-onboarding");
+  const openBtn = document.getElementById("btn-open-tour");
+  if (!modal || !stepsEl) return;
+
+  let current = 0;
+
+  function markSeen() {
+    try { localStorage.setItem(ONBOARDING_KEY, "1"); } catch (e) { /* private mode */ }
+  }
+
+  function render() {
+    const step = ONBOARDING_STEPS[current];
+    titleEl.textContent = step.title;
+    stepsEl.innerHTML = step.body;
+    progressEl.innerHTML = ONBOARDING_STEPS.map((_, i) =>
+      `<span class="dot${i === current ? " active" : ""}"></span>`
+    ).join("");
+    prevBtn.disabled = current === 0;
+    // Last step re-labels the primary CTA and optionally triggers an action.
+    const isLast = current === ONBOARDING_STEPS.length - 1;
+    nextBtn.textContent = isLast ? (step.action?.label ?? "Done") : "Next";
+  }
+
+  function open() {
+    current = 0;
+    render();
+    modal.hidden = false;
+  }
+
+  function close() {
+    modal.hidden = true;
+    markSeen();
+  }
+
+  function next() {
+    if (current < ONBOARDING_STEPS.length - 1) {
+      current++;
+      render();
+      return;
+    }
+    const step = ONBOARDING_STEPS[current];
+    if (step.action && typeof loadBot === "function" && step.action.bot) {
+      try { loadBot(step.action.bot); } catch (e) { /* non-fatal */ }
+    }
+    close();
+  }
+
+  function prev() {
+    if (current > 0) { current--; render(); }
+  }
+
+  nextBtn.addEventListener("click", next);
+  prevBtn.addEventListener("click", prev);
+  skipBtn.addEventListener("click", close);
+  closeBtn.addEventListener("click", close);
+  openBtn?.addEventListener("click", open);
+
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+
+  document.addEventListener("keydown", (e) => {
+    if (modal.hidden) return;
+    if (e.key === "Escape") { e.preventDefault(); close(); }
+    if (e.key === "ArrowRight") { e.preventDefault(); next(); }
+    if (e.key === "ArrowLeft")  { e.preventDefault(); prev(); }
+  });
+
+  // Show on first visit. Defer past initial render so the layout has settled.
+  try {
+    if (!localStorage.getItem(ONBOARDING_KEY)) {
+      setTimeout(open, 400);
+    }
+  } catch (e) { /* private mode -> skip auto-open */ }
+}
+
+// --- Editor autocomplete ----------------------------------------------------
+//
+// Lightweight IntelliSense for the ArenaScript editor. We derive the
+// completion list from the same LANG_REFERENCE data that feeds the reference
+// drawer (single source of truth) plus a small hardcoded keyword set, so
+// every new sensor added to the reference immediately shows up in the popup.
+//
+// Trigger rules:
+//   * Any identifier character (word) >= 2 chars long opens the popup.
+//   * Arrow keys navigate, Tab/Enter accept, Escape dismisses.
+//   * Caret position is approximated from the textarea's computed line-height
+//     and character width (the editor uses a monospace font). We don't try to
+//     handle soft-wrap because the editor disables it.
+
+const KEYWORD_COMPLETIONS = [
+  { label: "on tick", kind: "event", snippet: "on tick {\n  \n}" },
+  { label: "on spawn", kind: "event", snippet: "on spawn {\n  \n}" },
+  { label: "on damaged(event)", kind: "event", snippet: "on damaged(event) {\n  \n}" },
+  { label: "on low_health", kind: "event", snippet: "on low_health {\n  \n}" },
+  { label: "on destroyed", kind: "event", snippet: "on destroyed {\n  \n}" },
+  { label: "on enemy_seen(event)", kind: "event", snippet: "on enemy_seen(event) {\n  \n}" },
+  { label: "on enemy_lost(event)", kind: "event", snippet: "on enemy_lost(event) {\n  \n}" },
+  { label: "on cooldown_ready(event)", kind: "event", snippet: "on cooldown_ready(event) {\n  \n}" },
+  { label: "on signal_received(event)", kind: "event", snippet: "on signal_received(event) {\n  \n}" },
+  { label: "meta", kind: "keyword" },
+  { label: "const", kind: "keyword" },
+  { label: "state", kind: "keyword" },
+  { label: "squad", kind: "keyword" },
+  { label: "let", kind: "keyword" },
+  { label: "set", kind: "keyword" },
+  { label: "if", kind: "keyword" },
+  { label: "else", kind: "keyword" },
+  { label: "for", kind: "keyword" },
+  { label: "while", kind: "keyword" },
+  { label: "break", kind: "keyword" },
+  { label: "continue", kind: "keyword" },
+  { label: "return", kind: "keyword" },
+  { label: "after", kind: "keyword" },
+  { label: "every", kind: "keyword" },
+  { label: "fn", kind: "keyword" },
+  { label: "true", kind: "literal" },
+  { label: "false", kind: "literal" },
+  { label: "null", kind: "literal" },
+  { label: "and", kind: "operator" },
+  { label: "or", kind: "operator" },
+  { label: "not", kind: "operator" },
+];
+
+/** Extract a flat list of completion candidates from LANG_REFERENCE. */
+function buildCompletionList() {
+  const items = [...KEYWORD_COMPLETIONS];
+  for (const section of LANG_REFERENCE) {
+    for (const entry of section.entries) {
+      // Entries can list multiple names separated by " / " — split them so
+      // each name is independently completable. We strip generic parameters
+      // and type annotations ("fn name(args) -> type") down to just the
+      // identifier the user would type.
+      const rawNames = String(entry.name).split(/\s*\/\s*/);
+      for (const raw of rawNames) {
+        const match = raw.match(/^([A-Za-z_][A-Za-z0-9_]*)(\(.*\))?/);
+        if (!match) continue;
+        const name = match[1];
+        if (items.some(i => i.label === name)) continue;
+        items.push({
+          label: name,
+          kind: sectionKind(section.id),
+          detail: entry.sig ?? section.label,
+          doc: entry.desc ?? "",
+        });
+      }
+    }
+  }
+  return items;
+}
+
+function sectionKind(id) {
+  if (id === "perception" || id === "state") return "sensor";
+  if (id === "combat" || id === "movement") return "action";
+  if (id === "debug") return "debug";
+  if (id === "stdlib" || id === "math") return "stdlib";
+  return "lang";
+}
+
+export function installEditorAutocomplete(editorEl, onAccept) {
+  if (!editorEl) return;
+
+  const allItems = buildCompletionList();
+
+  // Build the popup element lazily so we only touch the DOM when needed.
+  const popup = document.createElement("div");
+  popup.className = "editor-autocomplete";
+  popup.hidden = true;
+  document.body.appendChild(popup);
+
+  let filtered = [];
+  let active = 0;
+  let anchor = null; // { start, end, word }
+  let suppressNext = false; // skip re-open after an accept/dismiss
+
+  function getCaretWordRange() {
+    const pos = editorEl.selectionStart;
+    if (pos !== editorEl.selectionEnd) return null;
+    const src = editorEl.value;
+    // Walk backwards to find identifier start
+    let start = pos;
+    while (start > 0 && /[A-Za-z0-9_]/.test(src[start - 1])) start--;
+    if (start === pos) return null; // cursor is not inside/adjacent a word
+    // Only trigger once the user has typed at least 2 chars — 1-char prefixes
+    // match far too many things and produce noise.
+    const word = src.slice(start, pos);
+    if (word.length < 2) return null;
+    // Don't trigger inside strings or comments — cheap heuristic: look at the
+    // current line up to the caret and bail if an odd number of `"` came
+    // before it, or if a `//` appears earlier on the line.
+    const lineStart = src.lastIndexOf("\n", start - 1) + 1;
+    const prefix = src.slice(lineStart, start);
+    if (prefix.includes("//")) return null;
+    const quoteCount = (prefix.match(/"/g) ?? []).length;
+    if (quoteCount % 2 === 1) return null;
+    return { start, end: pos, word };
+  }
+
+  function computeCaretPosition() {
+    // Approximate caret pixel position using the editor's monospace metrics.
+    const style = getComputedStyle(editorEl);
+    const lineHeight = parseFloat(style.lineHeight) || 20;
+    const fontSize = parseFloat(style.fontSize) || 14;
+    // Monospace char width is ~0.6 × fontSize for most fonts; the editor uses
+    // 'JetBrains Mono' / system mono. Good enough for popup anchoring.
+    const charWidth = fontSize * 0.6;
+    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+
+    const src = editorEl.value.slice(0, editorEl.selectionStart);
+    const lineStart = src.lastIndexOf("\n") + 1;
+    const column = editorEl.selectionStart - lineStart;
+    const row = src.split("\n").length - 1;
+
+    const rect = editorEl.getBoundingClientRect();
+    const x = rect.left + paddingLeft + column * charWidth - editorEl.scrollLeft;
+    const y = rect.top + paddingTop + (row + 1) * lineHeight - editorEl.scrollTop;
+    return { x, y, lineHeight };
+  }
+
+  function render() {
+    if (filtered.length === 0) {
+      popup.hidden = true;
+      return;
+    }
+    popup.innerHTML = filtered.map((item, i) => `
+      <div class="ac-item${i === active ? " active" : ""}" data-idx="${i}">
+        <span class="ac-kind ac-${item.kind}">${item.kind}</span>
+        <span class="ac-label">${escapeHtml(item.label)}</span>
+        ${item.detail ? `<span class="ac-detail">${escapeHtml(item.detail)}</span>` : ""}
+      </div>`).join("");
+    const { x, y, lineHeight } = computeCaretPosition();
+    popup.style.left = `${Math.max(8, x)}px`;
+    popup.style.top = `${y + 2}px`;
+    popup.style.maxHeight = `${Math.min(240, window.innerHeight - y - 16)}px`;
+    popup.hidden = false;
+
+    for (const el of popup.querySelectorAll(".ac-item")) {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep focus on the textarea
+        const idx = Number(el.dataset.idx);
+        accept(filtered[idx]);
+      });
+    }
+  }
+
+  function refresh() {
+    if (suppressNext) { suppressNext = false; popup.hidden = true; return; }
+    anchor = getCaretWordRange();
+    if (!anchor) { popup.hidden = true; return; }
+    const q = anchor.word.toLowerCase();
+    filtered = allItems
+      .map(item => ({ item, score: matchScore(item.label.toLowerCase(), q) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
+      .map(x => x.item);
+    active = 0;
+    render();
+  }
+
+  function accept(item) {
+    if (!item || !anchor) return;
+    const before = editorEl.value.slice(0, anchor.start);
+    const after = editorEl.value.slice(anchor.end);
+    // Snippet mode: insert `snippet` and place caret on the first blank line
+    // inside braces when possible. For plain identifiers we just append `(` if
+    // the completion looks like a function and the next char isn't already `(`.
+    let insertion = item.snippet ?? item.label;
+    let newCaret = (before + insertion).length;
+    if (!item.snippet) {
+      // Append () for sensor/stdlib names the author is clearly calling.
+      const sectionLikeFunction = item.kind === "sensor" || item.kind === "stdlib" || item.kind === "debug";
+      if (sectionLikeFunction && after[0] !== "(") {
+        insertion += "()";
+        newCaret = (before + item.label + "(").length;
+      }
+    } else {
+      // Position caret on the first blank line inside the snippet (common
+      // pattern: `on tick {\n  |\n}`).
+      const blank = insertion.indexOf("\n  \n");
+      if (blank !== -1) newCaret = (before + insertion.slice(0, blank + 3)).length;
+    }
+    editorEl.value = before + insertion + after;
+    editorEl.selectionStart = editorEl.selectionEnd = newCaret;
+    popup.hidden = true;
+    suppressNext = true;
+    if (typeof onAccept === "function") onAccept();
+  }
+
+  function matchScore(label, query) {
+    if (label.startsWith(query)) return 100 - (label.length - query.length) * 0.1;
+    const idx = label.indexOf(query);
+    if (idx > 0) return 60 - idx;
+    // Loose scattered match as a last resort.
+    let j = 0;
+    for (let i = 0; i < label.length && j < query.length; i++) {
+      if (label[i] === query[j]) j++;
+    }
+    return j === query.length ? 20 : 0;
+  }
+
+  editorEl.addEventListener("input", () => {
+    // Defer so the textarea's value/selection has settled after the keystroke.
+    setTimeout(refresh, 0);
+  });
+
+  editorEl.addEventListener("blur", () => {
+    // Close on blur with a small delay so mousedown-accept still works.
+    setTimeout(() => { popup.hidden = true; }, 120);
+  });
+
+  editorEl.addEventListener("keydown", (e) => {
+    if (popup.hidden) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      active = (active + 1) % filtered.length;
+      render();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active - 1 + filtered.length) % filtered.length;
+      render();
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      if (filtered.length > 0) {
+        e.preventDefault();
+        accept(filtered[active]);
+      }
+    } else if (e.key === "Escape") {
+      popup.hidden = true;
+    }
+  });
+}
+
 // --- Utilities --------------------------------------------------------------
 
 function escapeHtml(s) {

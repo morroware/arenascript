@@ -33,6 +33,9 @@
       <button id="btn-open-lang-ref" class="btn btn-ghost" title="Language reference (Ctrl+/)">
         Docs
       </button>
+      <button id="btn-open-tour" class="btn btn-ghost" title="Re-open the onboarding tour">
+        Tour
+      </button>
       <span id="auth-status" class="shortcut-hint">Guest</span>
       <button id="btn-auth-open" class="btn btn-compile">Sign In</button>
       <button id="btn-auth-logout" class="btn btn-save" hidden>Sign Out</button>
@@ -49,6 +52,24 @@
 
       <!-- Builder sidebar content: presets + user bots -->
       <div class="sidebar-panel" data-sidebar="builder">
+        <div class="sidebar-header">Start Here · Tutorial</div>
+
+        <button class="bot-preset" data-bot="rookie" title="Rookie — Simplest possible bot. Start here.">
+          <div class="bot-class-icon brawler">1</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Rookie</span>
+            <span class="bot-preset-class">Brawler · Beginner</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="scout" title="Scout — Introduces state, log(), and waypoints.">
+          <div class="bot-class-icon ranger">2</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Scout</span>
+            <span class="bot-preset-class">Ranger · Beginner+</span>
+          </div>
+        </button>
+
         <div class="sidebar-header">Presets</div>
 
         <button class="bot-preset active" data-bot="bruiser" title="Bruiser — Aggressive Brawler">
@@ -148,6 +169,16 @@
           <div class="bot-preset-info">
             <span class="bot-preset-name">Zealot</span>
             <span class="bot-preset-class">Brawler · Reactive</span>
+          </div>
+        </button>
+
+        <div class="sidebar-subheader">Beta · Showcase</div>
+
+        <button class="bot-preset" data-bot="predator" title="Predator — Dodges incoming fire, leads shots, coordinates via hive. Uses every new beta stdlib sensor.">
+          <div class="bot-class-icon ranger">P</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Predator</span>
+            <span class="bot-preset-class">Ranger · Predictive</span>
           </div>
         </button>
 
@@ -494,6 +525,30 @@
           <div class="shortcut-row"><kbd>Space</kbd><span>Play / pause replay</span></div>
           <div class="shortcut-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Step frame back / forward</span></div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Onboarding Tour (shown on first run; re-openable from header) -->
+  <div id="onboarding-modal" class="tb-modal-overlay" hidden role="dialog" aria-label="Welcome to ArenaScript">
+    <div class="tb-modal onboarding-modal">
+      <div class="tb-modal-header">
+        <h2 id="onboarding-title">Welcome to ArenaScript</h2>
+        <button id="btn-close-onboarding" class="tb-modal-close" title="Close">&times;</button>
+      </div>
+      <div class="tb-modal-body onboarding-body">
+        <div id="onboarding-steps">
+          <!-- Steps are rendered by JS; static fallback text below keeps a11y tools happy -->
+          <p>Loading tour…</p>
+        </div>
+      </div>
+      <div class="tb-modal-footer onboarding-footer">
+        <div class="onboarding-progress" id="onboarding-progress"></div>
+        <div class="onboarding-nav">
+          <button id="btn-onboarding-skip" class="btn btn-ghost">Skip</button>
+          <button id="btn-onboarding-prev" class="btn">Back</button>
+          <button id="btn-onboarding-next" class="btn btn-run">Next</button>
+        </div>
       </div>
     </div>
   </div>

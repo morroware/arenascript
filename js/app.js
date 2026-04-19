@@ -22,6 +22,8 @@ import {
   installShortcutHelp,
   installLangReference,
   installCommandPalette,
+  installEditorAutocomplete,
+  installOnboarding,
   showMatchLoading,
   updateMatchLoading,
   hideMatchLoading,
@@ -1377,6 +1379,329 @@ on low_health {
   if heal != null { move_to heal.position }
 }`,
   },
+
+  // ==========================================================================
+  // BETA TUTORIAL BOTS
+  //
+  // These three bots were added for the beta release. They're deliberately
+  // short, heavily commented, and ordered by difficulty so new authors can
+  // open them in sequence and see a concept per file:
+  //   rookie  — simplest possible bot (first `on tick` + one action)
+  //   scout   — introduces state, log(), and a memory waypoint
+  //   predator— advanced: predictive aim, incoming-projectile dodge,
+  //             threat-aware mode switching using every new beta helper.
+  // ==========================================================================
+
+  rookie: {
+    name: "Rookie",
+    class: "brawler",
+    source: `robot "Rookie" version "1.0"
+
+// ----------------------------------------------------------------------------
+// Your very first bot.
+//
+// Every arenascript program has three pieces you'll see in almost every file:
+//   1. A 'robot' header declaring the bot's display name and version.
+//   2. A 'meta' block tagging author + class (brawler/ranger/tank/support).
+//   3. An 'on tick' handler — the main decision loop that runs every tick.
+//
+// This bot's logic fits in four lines:
+//   * see an enemy?    -> attack when in range, otherwise close the gap
+//   * see no enemy?    -> wander forward so we explore the arena
+//
+// Open the Scout preset next to learn how to remember things between ticks.
+// ----------------------------------------------------------------------------
+
+meta {
+  author: "ArenaLab"
+  class: "brawler"
+}
+
+on tick {
+  let enemy = nearest_enemy()
+
+  // No visible target — walk forward. move_forward is the simplest movement.
+  if enemy == null {
+    move_forward
+    return
+  }
+
+  // In range + cooldown ready? Strike. can_attack() encapsulates both checks.
+  if can_attack(enemy) {
+    attack enemy
+    return
+  }
+
+  // Otherwise close the distance. move_toward accepts a position or entity.
+  move_toward enemy.position
+}`,
+  },
+
+  scout: {
+    name: "Scout",
+    class: "ranger",
+    source: `robot "Scout" version "1.0"
+
+// ----------------------------------------------------------------------------
+// Second-tier tutorial. Introduces three ideas you'll use all the time:
+//
+//   * state { ... }        — variables that persist across ticks. Mutate
+//                            them with 'set'. Constants (const { ... }) are
+//                            immutable numbers/strings evaluated at compile.
+//
+//   * log(...)             — prints to the UI console after the match runs,
+//                            prefixed with the bot name and tick index.
+//                            Capped at 500 lines per match so use 'every N'
+//                            or guard blocks to keep output readable.
+//
+//   * mark_position / recall_position — save a position by name so you can
+//                            return to it later (here: our spawn point).
+//
+// The bot wanders between its spawn and whichever control point it finds,
+// and falls back to the spawn if it gets lost or takes damage.
+// ----------------------------------------------------------------------------
+
+meta {
+  author: "ArenaLab"
+  class: "ranger"
+}
+
+const {
+  ENGAGE_RANGE = 10
+  FALLBACK_HP = 35
+}
+
+state {
+  mode: string = "explore"
+}
+
+on spawn {
+  mark_position "home"
+  log("Scout deployed, home saved")
+}
+
+on tick {
+  // Emergency: low HP -> hide in a heal zone if we know one, otherwise
+  // fall back to the remembered home waypoint.
+  if health_percent() < FALLBACK_HP {
+    if mode != "fallback" {
+      log("falling back, hp=", health_percent())
+      set mode = "fallback"
+    }
+    let heal = nearest_heal_zone()
+    if heal != null { move_to heal.position return }
+    let home = recall_position("home")
+    if home != null { move_to home return }
+  }
+
+  // Primary: shoot visible enemies from stand-off range.
+  let enemy = nearest_enemy()
+  if enemy != null and distance_to(enemy.position) < ENGAGE_RANGE {
+    if mode != "engage" {
+      log("engaging ", enemy.id)
+      set mode = "engage"
+    }
+    fire_at enemy.position
+    return
+  }
+
+  // Secondary: press the nearest control point we've discovered.
+  let cp = nearest_control_point()
+  if cp != null {
+    if mode != "capture" {
+      log("moving to cp")
+      set mode = "capture"
+    }
+    move_to cp.position
+    return
+  }
+
+  // Nothing interesting — keep exploring.
+  move_forward
+}
+
+on damaged(event) {
+  // event.data.damage tells you how hard you were hit; handy for triage.
+  log("took damage ", event.data.damage)
+}`,
+  },
+
+  predator: {
+    name: "Predator",
+    class: "ranger",
+    source: `robot "Predator" version "1.0"
+
+// ----------------------------------------------------------------------------
+// Advanced beta showcase. Pulls every major perception + stdlib feature
+// together into one predictive, reactive bot:
+//
+//   * incoming_projectile() + normalize() -> perpendicular dodge
+//   * predict_position()    -> lead-shot firing solution
+//   * threat_level()        -> single-scalar mode gate
+//   * list_first(), index_of(), list_contains() -> target memory
+//   * chance(), rand_float() -> non-deterministic feints within a seed
+//   * hive_set/get          -> coordinate with allies on focus-fire
+//   * log() + starts_with() -> self-diagnostics surfaced to the console
+//
+// Open this AFTER reading Scout. It's long, but the comments explain every
+// non-obvious branch, and nothing here is magic — every sensor is listed in
+// the Language Reference drawer (Ctrl+/).
+// ----------------------------------------------------------------------------
+
+meta {
+  author: "ArenaLab"
+  class: "ranger"
+}
+
+const {
+  PANIC_THREAT = 70
+  LEAD_TICKS = 6
+  DODGE_MIN_TICKS = 4
+  FEINT_CHANCE = 0.15
+}
+
+state {
+  last_target: string = ""
+  dodge_until: number = 0
+}
+
+// Perpendicular dodge: given a projectile direction vector, pick a side-step
+// target that moves us 8 units away from the projectile path.
+fn dodge_vector(dir_x: number, dir_y: number) -> position {
+  // Rotate (dx, dy) by 90 degrees to get a perpendicular unit vector, then
+  // normalize so the step size is predictable.
+  let perp = normalize(make_position(-dir_y, dir_x))
+  let me = position()
+  return make_position(me.x + perp.x * 8, me.y + perp.y * 8)
+}
+
+on spawn {
+  log("predator online")
+  set dodge_until = 0
+}
+
+on tick {
+  // --- Stage 1: honor an in-progress dodge before taking any other action.
+  // Committing for DODGE_MIN_TICKS keeps us from thrashing between dodge and
+  // fire-aim when a new projectile appears on the very next tick.
+  if current_tick() < dodge_until {
+    let side = mod(current_tick(), 2)
+    if side == 0 { strafe_left } else { strafe_right }
+    return
+  }
+
+  // --- Stage 2: dodge incoming fire; avoiding damage beats dealing it.
+  let inc = incoming_projectile()
+  if inc != null and inc.ticks_to_impact <= LEAD_TICKS {
+    set dodge_until = current_tick() + DODGE_MIN_TICKS
+    let goto = dodge_vector(inc.direction.x, inc.direction.y)
+    move_to goto
+    if chance(0.5) {
+      // Take a snap shot on the way out the door if we're not venting heat.
+      let close = nearest_enemy()
+      if close != null and heat_percent() < 70 {
+        fire_at close.position
+      }
+    }
+    log("dodging, impact in ", inc.ticks_to_impact)
+    return
+  }
+
+  // --- Stage 3: threat gate. If we're in real trouble, break contact.
+  let threat = threat_level()
+  if threat > PANIC_THREAT {
+    let heal = nearest_heal_zone()
+    if heal != null { move_to heal.position return }
+    let home = recall_position("home")
+    if home != null { move_to home return }
+    retreat
+    return
+  }
+
+  // --- Stage 4: target selection. Prefer the hive's focus-fire target; fall
+  // back to the lowest-HP visible enemy, then the nearest enemy.
+  let focus_id = hive_get("focus")
+  let visible = visible_enemies()
+  let target = null
+
+  if focus_id != null {
+    // focus_id is a string; find its view in visible_enemies if still visible.
+    let idx = 0
+    while idx < length(visible) {
+      let e = visible[idx]
+      if e.id == focus_id { set target = e break }
+      set idx = idx + 1
+    }
+  }
+
+  if target == null {
+    let weakest = weakest_visible_enemy()
+    if weakest != null { set target = weakest }
+  }
+  if target == null { set target = list_first(visible) }
+
+  if target == null {
+    // Nothing to shoot at. Occasionally fire a scan ping to refresh memory.
+    if chance(0.10) { scan(12) }
+    let cp = nearest_enemy_control_point()
+    if cp != null { move_to cp.position return }
+    move_forward
+    return
+  }
+
+  // Broadcast our pick to the squad so allies can pile on.
+  hive_set("focus", target.id)
+  if target.id != last_target {
+    log("new target ", target.id)
+    set last_target = target.id
+  }
+
+  // --- Stage 5: lead the shot. Predict where the target will be and fire
+  // there instead of where they currently are — ignoring lead is what lets
+  // low-skill bots miss stationary kites.
+  let aim = predict_position(target, LEAD_TICKS)
+  let d = distance_to(target.position)
+
+  if d > 14 {
+    move_toward target.position
+    return
+  }
+
+  if can_attack(target) and d < 3 {
+    attack target
+    return
+  }
+
+  // Occasional feint: 15% of eligible ticks, strafe instead of firing to
+  // break the enemy's aim solution. rand_float is deterministic per seed so
+  // matches stay reproducible even with the randomness.
+  if chance(FEINT_CHANCE) {
+    if rand_float(0, 1) < 0.5 { strafe_left } else { strafe_right }
+    return
+  }
+
+  if heat_percent() < 75 and ammo() > 2 {
+    fire_at aim
+  } else if heat_percent() >= 75 {
+    vent_heat
+  } else {
+    move_toward target.position
+  }
+}
+
+on damaged(event) {
+  // If we took a big hit, log the attacker id for post-match analysis.
+  if event.data.damage > 12 {
+    log("heavy hit from ", event.data.sourceId)
+  }
+}
+
+on destroyed {
+  // Announce our death so allies can shift focus; clears the stale hive key.
+  send_signal "predator_down"
+  hive_set("focus", null)
+}`,
+  },
 };
 
 const TEAM_PRESETS = {
@@ -1804,6 +2129,24 @@ function logToConsole(message, type = "info") {
   consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
+/**
+ * Flush the bot log sink collected during a match to the UI console.
+ * Each entry gets a `[tick][BotName]` prefix so authors can correlate log
+ * output with the replay scrubber. Capped so a runaway every {} timer can't
+ * freeze the DOM — the rest are summarised as an omitted count.
+ */
+function flushBotLogs(logs) {
+  if (!Array.isArray(logs) || logs.length === 0) return;
+  const max = 120;
+  const shown = logs.slice(0, max);
+  logToConsole(`--- Bot logs (${shown.length}${logs.length > max ? ` of ${logs.length}, truncated` : ""}) ---`, "event");
+  for (const entry of shown) {
+    const tick = String(entry.tick ?? 0).padStart(4, " ");
+    const name = entry.robotName ?? entry.robotId ?? "?";
+    logToConsole(`  [t=${tick}] ${name}: ${entry.message}`, "info");
+  }
+}
+
 function clearConsole() {
   consoleEl.innerHTML = "";
 }
@@ -2017,6 +2360,7 @@ async function doRunMatch() {
   for (const [id, stats] of result.robotStats) {
     logToConsole(`  ${id}: dmg=${stats.damageDealt}  taken=${stats.damageTaken}  kills=${stats.kills}`, "stat");
   }
+  flushBotLogs(result.botLogs);
 
   // Record to the local match history so users can scroll back through
   // their recent runs. Stored in localStorage; wiped via a header button.
@@ -2117,6 +2461,7 @@ async function doRunTeamSimulation() {
   const opponentName = teamPreset.name;
   logToConsole(`\n--- Team Simulation: ${teamPreset.name} ---`, "event");
   logToConsole(`Winner: ${result.winner === null ? "DRAW" : `Team ${result.winner}`} | ${result.reason}`, "success");
+  flushBotLogs(result.botLogs);
   showMatchResults(result, opponentName);
   startReplay(result, opponentName);
 }
@@ -3544,6 +3889,7 @@ function tbRunBattle() {
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
   logToConsole(`Winner: ${result.winner === null ? "DRAW" : `Team ${result.winner}`} | ${result.reason} | ${result.tickCount} ticks`, "success");
+  flushBotLogs(result.botLogs);
   showMatchResults(result, "Enemy Team");
   startReplay(result, "Team Battle");
 }
@@ -4366,6 +4712,17 @@ document.getElementById("btn-match-history-clear")?.addEventListener("click", ()
 
 installShortcutHelp();
 installLangReference();
+installEditorAutocomplete(editorEl, () => {
+  // Re-run syntax highlight + diagnostic rebuild after a completion accept
+  // so the inserted text is styled immediately.
+  onEditorInput();
+});
+installOnboarding({
+  loadBot: (key) => {
+    loadPreset(key);
+    setView("builder");
+  },
+});
 
 installCommandPalette(() => {
   // Build the command list dynamically so newly saved user bots, current

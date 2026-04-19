@@ -61,6 +61,14 @@ const BUILTIN_SENSORS = new Set([
   "damage_direction", "last_damage_tick", "threat_level",
   // Debug / introspection
   "log",
+  // List stdlib
+  "list_contains", "list_first", "list_last", "list_sum", "index_of",
+  // String stdlib
+  "string_contains", "starts_with", "ends_with",
+  // Extended random
+  "rand_float", "chance",
+  // Extended vector math
+  "hypot", "mod", "dot", "normalize", "vec_add", "vec_scale",
 ]);
 
 const VALID_ACTIONS = new Set([

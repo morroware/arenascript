@@ -44,6 +44,24 @@ function toNum(v) {
   return v;
 }
 
+/** Readable stringification for log() output — mirrors VM.stringify for consistency. */
+function logValueToString(v) {
+  if (v === null || v === undefined) return "null";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return "0";
+    return Number.isInteger(v) ? v.toString() : v.toFixed(2);
+  }
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (Array.isArray(v)) return `[list x${v.length}]`;
+  if (v && typeof v === "object") {
+    if ("x" in v && "y" in v) return `(${logValueToString(v.x)}, ${logValueToString(v.y)})`;
+    if (v.id) return `<${v.id}>`;
+    return "<object>";
+  }
+  return String(v);
+}
+
 /** Extract an {x,y} position from a raw vec, a sensor view, or null. */
 function extractPosition(v) {
   if (v == null || typeof v !== "object") return null;
@@ -57,8 +75,18 @@ function extractPosition(v) {
   return null;
 }
 
-/** Create the sensor gateway for a given world */
-export function createSensorGateway(world) {
+/**
+ * Create the sensor gateway for a given world.
+ *
+ * @param {World} world
+ * @param {object} [options]
+ * @param {Array} [options.logs] — if provided, log() calls push entries here
+ *   as { robotId, robotName, tick, message } tuples. The tick loop surfaces
+ *   them to the UI console after the match finishes so bot authors can trace
+ *   their state machines without leaving the editor.
+ */
+export function createSensorGateway(world, options = {}) {
+  const logSink = options.logs ?? null;
   const mapRobotView = (targetRobot) => robotToSensorView(targetRobot);
   const scanEnemies = (robot, range) => {
     const detected = [];
@@ -904,11 +932,137 @@ export function createSensorGateway(world) {
       }
 
       // log(msg, [value]) -> null
-      //   No-op for the runtime itself (diagnostic channel only). The VM's
-      //   decision-trace captures this through the action stream; for now
-      //   we just swallow it so bots can document state transitions.
-      case "log":
+      //   Emits a diagnostic line to the shared log sink so bot authors can
+      //   trace state-machine transitions from the UI console. When no sink
+      //   is attached (e.g. server-side validation runs) the call is a cheap
+      //   no-op — we still flatten the args so stringify never throws.
+      case "log": {
+        if (!logSink || !Array.isArray(logSink)) return null;
+        if (logSink.length >= 500) return null; // cap DOM/noise blast radius
+        const parts = [];
+        for (const a of args) parts.push(logValueToString(a));
+        const message = parts.join(" ");
+        logSink.push({
+          robotId: robot.id,
+          robotName: robot.name ?? robot.id,
+          teamId: robot.teamId,
+          tick: world.currentTick,
+          message,
+        });
         return null;
+      }
+
+      // --- List stdlib ---
+      case "list_contains": {
+        const list = args[0];
+        const needle = args[1];
+        if (!Array.isArray(list)) return false;
+        for (const item of list) {
+          if (item === needle) return true;
+          // Handle entity objects (common case): match by id
+          if (item && typeof item === "object" && needle && typeof needle === "object"
+              && "id" in item && "id" in needle && item.id === needle.id) return true;
+        }
+        return false;
+      }
+      case "list_first": {
+        const list = args[0];
+        return Array.isArray(list) && list.length > 0 ? list[0] : null;
+      }
+      case "list_last": {
+        const list = args[0];
+        return Array.isArray(list) && list.length > 0 ? list[list.length - 1] : null;
+      }
+      case "list_sum": {
+        const list = args[0];
+        if (!Array.isArray(list)) return 0;
+        let sum = 0;
+        for (const v of list) sum += toNum(v);
+        return sum;
+      }
+      case "index_of": {
+        const list = args[0];
+        const needle = args[1];
+        if (!Array.isArray(list)) return -1;
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i];
+          if (item === needle) return i;
+          if (item && typeof item === "object" && needle && typeof needle === "object"
+              && "id" in item && "id" in needle && item.id === needle.id) return i;
+        }
+        return -1;
+      }
+
+      // --- String stdlib (lean — no regex/split to keep the VM simple) ---
+      case "string_contains": {
+        const hay = typeof args[0] === "string" ? args[0] : "";
+        const needle = typeof args[1] === "string" ? args[1] : "";
+        return needle.length === 0 ? true : hay.indexOf(needle) !== -1;
+      }
+      case "starts_with": {
+        const hay = typeof args[0] === "string" ? args[0] : "";
+        const prefix = typeof args[1] === "string" ? args[1] : "";
+        return hay.startsWith(prefix);
+      }
+      case "ends_with": {
+        const hay = typeof args[0] === "string" ? args[0] : "";
+        const suffix = typeof args[1] === "string" ? args[1] : "";
+        return hay.endsWith(suffix);
+      }
+
+      // --- Random (float variant — deterministic via world.rng) ---
+      case "rand_float": {
+        const min = toNum(args[0] ?? 0);
+        const max = toNum(args[1] ?? 1);
+        const low = Math.min(min, max);
+        const high = Math.max(min, max);
+        return world.rng.nextFloat(low, high);
+      }
+      case "chance": {
+        // chance(p) -> true with probability p (0..1). Convenience for
+        // stochastic decisions ("fire grenade 20% of ticks").
+        const p = Math.min(Math.max(toNum(args[0] ?? 0), 0), 1);
+        return world.rng.nextFloat(0, 1) < p;
+      }
+
+      // --- Pure vector/math helpers ---
+      case "hypot": return Math.hypot(toNum(args[0]), toNum(args[1]));
+      case "mod": {
+        const a = toNum(args[0]);
+        const b = toNum(args[1]);
+        if (b === 0) return 0;
+        // JS `%` retains the sign of the dividend; we want mathematical mod
+        // so negative arguments return a positive result — much less
+        // surprising when authors use mod() for tick-phase rotation.
+        const r = a % b;
+        return r < 0 ? r + Math.abs(b) : r;
+      }
+      case "dot": {
+        const a = extractPosition(args[0]);
+        const b = extractPosition(args[1]);
+        if (!a || !b) return 0;
+        return a.x * b.x + a.y * b.y;
+      }
+      case "normalize": {
+        const v = extractPosition(args[0]);
+        if (!v) return { x: 0, y: 0 };
+        const len = Math.hypot(v.x, v.y);
+        if (len < 1e-6) return { x: 0, y: 0 };
+        return { x: v.x / len, y: v.y / len };
+      }
+      case "vec_add": {
+        const a = extractPosition(args[0]);
+        const b = extractPosition(args[1]);
+        if (!a) return b ?? { x: 0, y: 0 };
+        if (!b) return a;
+        return { x: a.x + b.x, y: a.y + b.y };
+      }
+      case "vec_scale": {
+        const v = extractPosition(args[0]);
+        const s = toNum(args[1]);
+        if (!v) return { x: 0, y: 0 };
+        return { x: v.x * s, y: v.y * s };
+      }
 
       default:
         // Semantic analysis rejects unknown sensors at compile time, so
