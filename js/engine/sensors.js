@@ -27,6 +27,28 @@ function robotToSensorView(robot) {
   };
 }
 
+/** Coerce any VM-visible value to a finite number (0 fallback to avoid NaN leaks). */
+function toNum(v) {
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return v;
+}
+
+/** Extract an {x,y} position from a raw vec, a sensor view, or null. */
+function extractPosition(v) {
+  if (v == null || typeof v !== "object") return null;
+  if ("x" in v && "y" in v && typeof v.x === "number" && typeof v.y === "number") {
+    return { x: v.x, y: v.y };
+  }
+  if ("position" in v && v.position && typeof v.position === "object" &&
+      "x" in v.position && "y" in v.position) {
+    return { x: v.position.x, y: v.position.y };
+  }
+  return null;
+}
+
 /** Create the sensor gateway for a given world */
 export function createSensorGateway(world) {
   const mapRobotView = (targetRobot) => robotToSensorView(targetRobot);
@@ -628,6 +650,132 @@ export function createSensorGateway(world) {
         const effectType = args[0];
         if (!effectType) return false;
         return robot.activeEffects.some(e => e.type === effectType && world.currentTick < e.expiresTick);
+      }
+
+      // --- Math built-ins ---
+      case "abs": return Math.abs(toNum(args[0]));
+      case "min": return Math.min(toNum(args[0]), toNum(args[1]));
+      case "max": return Math.max(toNum(args[0]), toNum(args[1]));
+      case "clamp": {
+        const x = toNum(args[0]);
+        const lo = toNum(args[1]);
+        const hi = toNum(args[2]);
+        return Math.min(Math.max(x, lo), hi);
+      }
+      case "floor": return Math.floor(toNum(args[0]));
+      case "ceil": return Math.ceil(toNum(args[0]));
+      case "round": return Math.round(toNum(args[0]));
+      case "sign": {
+        const x = toNum(args[0]);
+        return x > 0 ? 1 : x < 0 ? -1 : 0;
+      }
+      case "sqrt": {
+        const x = toNum(args[0]);
+        return x >= 0 ? Math.sqrt(x) : 0;
+      }
+      case "pow": return Math.pow(toNum(args[0]), toNum(args[1]));
+      case "lerp": {
+        const a = toNum(args[0]);
+        const b = toNum(args[1]);
+        const t = Math.min(Math.max(toNum(args[2]), 0), 1);
+        return a + (b - a) * t;
+      }
+      case "pi": return Math.PI;
+
+      // --- Vector / spatial helpers ---
+      case "distance_between": {
+        const a = extractPosition(args[0]);
+        const b = extractPosition(args[1]);
+        if (!a || !b) return 999;
+        return distance(a, b);
+      }
+      case "direction_to": {
+        const target = extractPosition(args[0]);
+        if (!target) return { x: robot.heading.x, y: robot.heading.y };
+        const dx = target.x - robot.position.x;
+        const dy = target.y - robot.position.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1e-6) return { x: robot.heading.x, y: robot.heading.y };
+        return { x: dx / len, y: dy / len };
+      }
+      case "angle_between": {
+        const a = extractPosition(args[0]);
+        const b = extractPosition(args[1]);
+        if (!a || !b) return 0;
+        const deg = Math.atan2(b.y - a.y, b.x - a.x) * (180 / Math.PI);
+        return Math.round(deg);
+      }
+      case "make_position": {
+        // Construct a position object the VM + engine can consume. Bounds-check
+        // to keep bogus coordinates from leaking into movement/aim logic.
+        const x = Math.min(Math.max(toNum(args[0]), 0), world.config.arenaWidth);
+        const y = Math.min(Math.max(toNum(args[1]), 0), world.config.arenaHeight);
+        return { x, y };
+      }
+
+      // --- Team / tactics helpers ---
+      case "squad_center": {
+        let sx = 0, sy = 0, n = 0;
+        for (const other of world.robots.values()) {
+          if (!other.alive) continue;
+          if (other.teamId !== robot.teamId) continue;
+          sx += other.position.x;
+          sy += other.position.y;
+          n++;
+        }
+        if (n === 0) return { x: robot.position.x, y: robot.position.y };
+        return { x: sx / n, y: sy / n };
+      }
+      case "lowest_health_ally": {
+        let best = null;
+        let bestHp = Infinity;
+        for (const other of world.robots.values()) {
+          if (!other.alive) continue;
+          if (other.teamId !== robot.teamId) continue;
+          if (other.id === robot.id) continue;
+          if (other.health < bestHp) {
+            bestHp = other.health;
+            best = other;
+          }
+        }
+        return best ? robotToSensorView(best) : null;
+      }
+      case "weakest_visible_enemy": {
+        const visible = getVisibleEnemies(world, robot);
+        if (visible.length === 0) return null;
+        let best = visible[0];
+        for (const e of visible) if (e.health < best.health) best = e;
+        return robotToSensorView(best);
+      }
+      case "count_enemies_near": {
+        const center = extractPosition(args[0]) ?? robot.position;
+        const range = toNum(args[1] ?? 10);
+        let count = 0;
+        for (const other of world.robots.values()) {
+          if (!other.alive) continue;
+          if (other.teamId === robot.teamId) continue;
+          if (other.cloakActive && distance(robot.position, other.position) > CLOAK_BREAK_DISTANCE) continue;
+          if (distance(center, other.position) <= range) count++;
+        }
+        return count;
+      }
+      case "count_allies_near": {
+        const center = extractPosition(args[0]) ?? robot.position;
+        const range = toNum(args[1] ?? 10);
+        let count = 0;
+        for (const other of world.robots.values()) {
+          if (!other.alive) continue;
+          if (other.teamId !== robot.teamId) continue;
+          if (other.id === robot.id) continue;
+          if (distance(center, other.position) <= range) count++;
+        }
+        return count;
+      }
+
+      // --- Timing helper ---
+      case "tick_phase": {
+        const period = Math.max(1, Math.floor(toNum(args[0] ?? 30)));
+        return world.currentTick % period;
       }
 
       default:

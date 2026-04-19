@@ -42,6 +42,16 @@ const BUILTIN_SENSORS = new Set([
   "nearest_depot", "is_on_depot",
   // Hive (shared team memory)
   "hive_get", "hive_set", "hive_has",
+  // Math built-ins
+  "abs", "min", "max", "clamp", "floor", "ceil", "round", "sign",
+  "sqrt", "pow", "lerp", "pi",
+  // Vector / spatial helpers
+  "distance_between", "direction_to", "angle_between", "make_position",
+  // Team / tactics helpers
+  "squad_center", "lowest_health_ally", "weakest_visible_enemy",
+  "count_enemies_near", "count_allies_near",
+  // Timing helper
+  "tick_phase",
 ]);
 
 const VALID_ACTIONS = new Set([
@@ -101,6 +111,10 @@ export class SemanticAnalyzer {
   #stateVars = new Set();
   #functions = new Map();
   #localScopes = [];
+  // Tracks usage + declaration span of state vars and constants so we can
+  // surface "declared but never used" warnings at the end of analysis.
+  #stateMeta = new Map(); // name -> { used:boolean, line, column }
+  #constMeta = new Map();
 
   analyze(program) {
     this.#diagnostics = [];
@@ -108,6 +122,8 @@ export class SemanticAnalyzer {
     this.#stateVars = new Set();
     this.#functions = new Map();
     this.#localScopes = [];
+    this.#stateMeta = new Map();
+    this.#constMeta = new Map();
 
     // Validate robot declaration
     if (!program.robot.name || program.robot.name.trim() === "") {
@@ -168,6 +184,7 @@ export class SemanticAnalyzer {
           this.#addError(`Duplicate constant '${entry.name}'`, entry.span.line, entry.span.column);
         }
         this.#constants.add(entry.name);
+        this.#constMeta.set(entry.name, { used: false, line: entry.span.line, column: entry.span.column });
       }
     }
 
@@ -179,6 +196,7 @@ export class SemanticAnalyzer {
         }
         this.#validateType(entry.type);
         this.#stateVars.add(entry.name);
+        this.#stateMeta.set(entry.name, { used: false, line: entry.span.line, column: entry.span.column });
       }
     }
 
@@ -229,6 +247,24 @@ export class SemanticAnalyzer {
     // Must have at least a tick handler
     if (!seenEvents.has("tick") && !seenEvents.has("spawn")) {
       this.#addWarning("Program has no 'tick' or 'spawn' handler", program.span.line, program.span.column);
+    }
+
+    // Unused declaration warnings — help new authors notice dead code.
+    for (const [name, meta] of this.#stateMeta) {
+      if (!meta.used) {
+        this.#addWarning(
+          `State variable '${name}' is declared but never read. Remove it or reference it with 'set' elsewhere.`,
+          meta.line, meta.column,
+        );
+      }
+    }
+    for (const [name, meta] of this.#constMeta) {
+      if (!meta.used) {
+        this.#addWarning(
+          `Constant '${name}' is declared but never used.`,
+          meta.line, meta.column,
+        );
+      }
     }
 
     return this.#diagnostics;
@@ -325,7 +361,22 @@ export class SemanticAnalyzer {
     switch (expr.kind) {
       case "Identifier":
         if (!this.#isResolvable(expr.name)) {
-          this.#addError(`Unknown identifier '${expr.name}'`, expr.span.line, expr.span.column);
+          // Offer a "did you mean?" across all names visible in scope so
+          // typos in sensor names, constants, or state vars get caught
+          // with a useful hint instead of a bare "Unknown identifier".
+          const candidates = new Set([
+            ...this.#constants, ...this.#stateVars,
+            ...BUILTIN_SENSORS, ...this.#functions.keys(),
+          ]);
+          for (const scope of this.#localScopes) {
+            for (const n of scope) candidates.add(n);
+          }
+          const suggestion = findClosestMatch(expr.name, candidates);
+          const hint = suggestion ? `. Did you mean '${suggestion}'?` : "";
+          this.#addError(`Unknown identifier '${expr.name}'${hint}`, expr.span.line, expr.span.column);
+        } else {
+          if (this.#stateMeta.has(expr.name)) this.#stateMeta.get(expr.name).used = true;
+          if (this.#constMeta.has(expr.name)) this.#constMeta.get(expr.name).used = true;
         }
         break;
 
