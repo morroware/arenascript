@@ -33,6 +33,9 @@
       <button id="btn-open-lang-ref" class="btn btn-ghost" title="Language reference (Ctrl+/)">
         Docs
       </button>
+      <button id="btn-open-tour" class="btn btn-ghost" title="Re-open the onboarding tour">
+        Tour
+      </button>
       <span id="auth-status" class="shortcut-hint">Guest</span>
       <button id="btn-auth-open" class="btn btn-compile">Sign In</button>
       <button id="btn-auth-logout" class="btn btn-save" hidden>Sign Out</button>
@@ -49,6 +52,24 @@
 
       <!-- Builder sidebar content: presets + user bots -->
       <div class="sidebar-panel" data-sidebar="builder">
+        <div class="sidebar-header">Start Here · Tutorial</div>
+
+        <button class="bot-preset" data-bot="rookie" title="Rookie — Simplest possible bot. Start here.">
+          <div class="bot-class-icon brawler">1</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Rookie</span>
+            <span class="bot-preset-class">Brawler · Beginner</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="scout" title="Scout — Introduces state, log(), and waypoints.">
+          <div class="bot-class-icon ranger">2</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Scout</span>
+            <span class="bot-preset-class">Ranger · Beginner+</span>
+          </div>
+        </button>
+
         <div class="sidebar-header">Presets</div>
 
         <button class="bot-preset active" data-bot="bruiser" title="Bruiser — Aggressive Brawler">
@@ -151,6 +172,16 @@
           </div>
         </button>
 
+        <div class="sidebar-subheader">Beta · Showcase</div>
+
+        <button class="bot-preset" data-bot="predator" title="Predator — Dodges incoming fire, leads shots, coordinates via hive. Uses every new beta stdlib sensor.">
+          <div class="bot-class-icon ranger">P</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Predator</span>
+            <span class="bot-preset-class">Ranger · Predictive</span>
+          </div>
+        </button>
+
         <div class="sidebar-header sidebar-header-user">
           <span>My Bots</span>
           <button id="btn-sidebar-new-bot" class="sidebar-mini-btn" title="New empty bot in editor">+ New</button>
@@ -208,6 +239,24 @@
 
         <div class="sidebar-section">
           <button id="btn-open-team-builder" class="btn btn-team-builder-open">Team Builder</button>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="sidebar-section">
+          <label for="gauntlet-slate">Gauntlet (your bot vs a slate)</label>
+          <select id="gauntlet-slate" class="opponent-select">
+            <option value="tutorial" selected>Beginner slate (Rookie, Bruiser, Kiter)</option>
+            <option value="mixed">Mixed slate (one per class)</option>
+            <option value="advanced">Advanced slate (Phantom, Overclock, Oracle, Zealot)</option>
+            <option value="all">All presets</option>
+          </select>
+          <div class="sidebar-inline-row" style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+            <label for="gauntlet-seeds" style="font-size:11px;color:var(--text-muted);">Seeds per foe</label>
+            <input id="gauntlet-seeds" type="number" min="1" max="10" value="3" class="opponent-select" style="max-width:64px;">
+          </div>
+          <button id="btn-run-gauntlet" class="btn btn-run btn-block" style="margin-top:8px;">Run Gauntlet</button>
+          <div class="sidebar-help">Runs your compiled bot vs each opponent across N seeds and reports winrate.</div>
         </div>
 
         <div class="sidebar-divider"></div>
@@ -294,6 +343,8 @@
               <span id="arena-status">Idle</span>
               <div class="arena-toggles">
                 <button id="btn-toggle-traces" class="arena-toggle-btn" title="Toggle decision traces">Traces</button>
+                <button id="btn-toggle-vision" class="arena-toggle-btn" title="Show each robot's vision range + last-seen markers">Vision</button>
+                <button id="btn-share-match" class="arena-toggle-btn" title="Copy a shareable bundle of this match (seed + bots) to your clipboard" disabled>Share</button>
                 <button id="btn-toggle-fullpage" class="arena-toggle-btn" title="Toggle full-page battle view">Expand</button>
               </div>
             </div>
@@ -494,6 +545,30 @@
           <div class="shortcut-row"><kbd>Space</kbd><span>Play / pause replay</span></div>
           <div class="shortcut-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Step frame back / forward</span></div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Onboarding Tour (shown on first run; re-openable from header) -->
+  <div id="onboarding-modal" class="tb-modal-overlay" hidden role="dialog" aria-label="Welcome to ArenaScript">
+    <div class="tb-modal onboarding-modal">
+      <div class="tb-modal-header">
+        <h2 id="onboarding-title">Welcome to ArenaScript</h2>
+        <button id="btn-close-onboarding" class="tb-modal-close" title="Close">&times;</button>
+      </div>
+      <div class="tb-modal-body onboarding-body">
+        <div id="onboarding-steps">
+          <!-- Steps are rendered by JS; static fallback text below keeps a11y tools happy -->
+          <p>Loading tour…</p>
+        </div>
+      </div>
+      <div class="tb-modal-footer onboarding-footer">
+        <div class="onboarding-progress" id="onboarding-progress"></div>
+        <div class="onboarding-nav">
+          <button id="btn-onboarding-skip" class="btn btn-ghost">Skip</button>
+          <button id="btn-onboarding-prev" class="btn">Back</button>
+          <button id="btn-onboarding-next" class="btn btn-run">Next</button>
+        </div>
       </div>
     </div>
   </div>

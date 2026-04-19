@@ -22,6 +22,8 @@ import {
   installShortcutHelp,
   installLangReference,
   installCommandPalette,
+  installEditorAutocomplete,
+  installOnboarding,
   showMatchLoading,
   updateMatchLoading,
   hideMatchLoading,
@@ -1377,6 +1379,329 @@ on low_health {
   if heal != null { move_to heal.position }
 }`,
   },
+
+  // ==========================================================================
+  // BETA TUTORIAL BOTS
+  //
+  // These three bots were added for the beta release. They're deliberately
+  // short, heavily commented, and ordered by difficulty so new authors can
+  // open them in sequence and see a concept per file:
+  //   rookie  — simplest possible bot (first `on tick` + one action)
+  //   scout   — introduces state, log(), and a memory waypoint
+  //   predator— advanced: predictive aim, incoming-projectile dodge,
+  //             threat-aware mode switching using every new beta helper.
+  // ==========================================================================
+
+  rookie: {
+    name: "Rookie",
+    class: "brawler",
+    source: `robot "Rookie" version "1.0"
+
+// ----------------------------------------------------------------------------
+// Your very first bot.
+//
+// Every arenascript program has three pieces you'll see in almost every file:
+//   1. A 'robot' header declaring the bot's display name and version.
+//   2. A 'meta' block tagging author + class (brawler/ranger/tank/support).
+//   3. An 'on tick' handler — the main decision loop that runs every tick.
+//
+// This bot's logic fits in four lines:
+//   * see an enemy?    -> attack when in range, otherwise close the gap
+//   * see no enemy?    -> wander forward so we explore the arena
+//
+// Open the Scout preset next to learn how to remember things between ticks.
+// ----------------------------------------------------------------------------
+
+meta {
+  author: "ArenaLab"
+  class: "brawler"
+}
+
+on tick {
+  let enemy = nearest_enemy()
+
+  // No visible target — walk forward. move_forward is the simplest movement.
+  if enemy == null {
+    move_forward
+    return
+  }
+
+  // In range + cooldown ready? Strike. can_attack() encapsulates both checks.
+  if can_attack(enemy) {
+    attack enemy
+    return
+  }
+
+  // Otherwise close the distance. move_toward accepts a position or entity.
+  move_toward enemy.position
+}`,
+  },
+
+  scout: {
+    name: "Scout",
+    class: "ranger",
+    source: `robot "Scout" version "1.0"
+
+// ----------------------------------------------------------------------------
+// Second-tier tutorial. Introduces three ideas you'll use all the time:
+//
+//   * state { ... }        — variables that persist across ticks. Mutate
+//                            them with 'set'. Constants (const { ... }) are
+//                            immutable numbers/strings evaluated at compile.
+//
+//   * log(...)             — prints to the UI console after the match runs,
+//                            prefixed with the bot name and tick index.
+//                            Capped at 500 lines per match so use 'every N'
+//                            or guard blocks to keep output readable.
+//
+//   * mark_position / recall_position — save a position by name so you can
+//                            return to it later (here: our spawn point).
+//
+// The bot wanders between its spawn and whichever control point it finds,
+// and falls back to the spawn if it gets lost or takes damage.
+// ----------------------------------------------------------------------------
+
+meta {
+  author: "ArenaLab"
+  class: "ranger"
+}
+
+const {
+  ENGAGE_RANGE = 10
+  FALLBACK_HP = 35
+}
+
+state {
+  mode: string = "explore"
+}
+
+on spawn {
+  mark_position "home"
+  log("Scout deployed, home saved")
+}
+
+on tick {
+  // Emergency: low HP -> hide in a heal zone if we know one, otherwise
+  // fall back to the remembered home waypoint.
+  if health_percent() < FALLBACK_HP {
+    if mode != "fallback" {
+      log("falling back, hp=", health_percent())
+      set mode = "fallback"
+    }
+    let heal = nearest_heal_zone()
+    if heal != null { move_to heal.position return }
+    let home = recall_position("home")
+    if home != null { move_to home return }
+  }
+
+  // Primary: shoot visible enemies from stand-off range.
+  let enemy = nearest_enemy()
+  if enemy != null and distance_to(enemy.position) < ENGAGE_RANGE {
+    if mode != "engage" {
+      log("engaging ", enemy.id)
+      set mode = "engage"
+    }
+    fire_at enemy.position
+    return
+  }
+
+  // Secondary: press the nearest control point we've discovered.
+  let cp = nearest_control_point()
+  if cp != null {
+    if mode != "capture" {
+      log("moving to cp")
+      set mode = "capture"
+    }
+    move_to cp.position
+    return
+  }
+
+  // Nothing interesting — keep exploring.
+  move_forward
+}
+
+on damaged(event) {
+  // event.data.damage tells you how hard you were hit; handy for triage.
+  log("took damage ", event.data.damage)
+}`,
+  },
+
+  predator: {
+    name: "Predator",
+    class: "ranger",
+    source: `robot "Predator" version "1.0"
+
+// ----------------------------------------------------------------------------
+// Advanced beta showcase. Pulls every major perception + stdlib feature
+// together into one predictive, reactive bot:
+//
+//   * incoming_projectile() + normalize() -> perpendicular dodge
+//   * predict_position()    -> lead-shot firing solution
+//   * threat_level()        -> single-scalar mode gate
+//   * list_first(), index_of(), list_contains() -> target memory
+//   * chance(), rand_float() -> non-deterministic feints within a seed
+//   * hive_set/get          -> coordinate with allies on focus-fire
+//   * log() + starts_with() -> self-diagnostics surfaced to the console
+//
+// Open this AFTER reading Scout. It's long, but the comments explain every
+// non-obvious branch, and nothing here is magic — every sensor is listed in
+// the Language Reference drawer (Ctrl+/).
+// ----------------------------------------------------------------------------
+
+meta {
+  author: "ArenaLab"
+  class: "ranger"
+}
+
+const {
+  PANIC_THREAT = 70
+  LEAD_TICKS = 6
+  DODGE_MIN_TICKS = 4
+  FEINT_CHANCE = 0.15
+}
+
+state {
+  last_target: string = ""
+  dodge_until: number = 0
+}
+
+// Perpendicular dodge: given a projectile direction vector, pick a side-step
+// target that moves us 8 units away from the projectile path.
+fn dodge_vector(dir_x: number, dir_y: number) -> position {
+  // Rotate (dx, dy) by 90 degrees to get a perpendicular unit vector, then
+  // normalize so the step size is predictable.
+  let perp = normalize(make_position(-dir_y, dir_x))
+  let me = position()
+  return make_position(me.x + perp.x * 8, me.y + perp.y * 8)
+}
+
+on spawn {
+  log("predator online")
+  set dodge_until = 0
+}
+
+on tick {
+  // --- Stage 1: honor an in-progress dodge before taking any other action.
+  // Committing for DODGE_MIN_TICKS keeps us from thrashing between dodge and
+  // fire-aim when a new projectile appears on the very next tick.
+  if current_tick() < dodge_until {
+    let side = mod(current_tick(), 2)
+    if side == 0 { strafe_left } else { strafe_right }
+    return
+  }
+
+  // --- Stage 2: dodge incoming fire; avoiding damage beats dealing it.
+  let inc = incoming_projectile()
+  if inc != null and inc.ticks_to_impact <= LEAD_TICKS {
+    set dodge_until = current_tick() + DODGE_MIN_TICKS
+    let goto = dodge_vector(inc.direction.x, inc.direction.y)
+    move_to goto
+    if chance(0.5) {
+      // Take a snap shot on the way out the door if we're not venting heat.
+      let close = nearest_enemy()
+      if close != null and heat_percent() < 70 {
+        fire_at close.position
+      }
+    }
+    log("dodging, impact in ", inc.ticks_to_impact)
+    return
+  }
+
+  // --- Stage 3: threat gate. If we're in real trouble, break contact.
+  let threat = threat_level()
+  if threat > PANIC_THREAT {
+    let heal = nearest_heal_zone()
+    if heal != null { move_to heal.position return }
+    let home = recall_position("home")
+    if home != null { move_to home return }
+    retreat
+    return
+  }
+
+  // --- Stage 4: target selection. Prefer the hive's focus-fire target; fall
+  // back to the lowest-HP visible enemy, then the nearest enemy.
+  let focus_id = hive_get("focus")
+  let visible = visible_enemies()
+  let target = null
+
+  if focus_id != null {
+    // focus_id is a string; find its view in visible_enemies if still visible.
+    let idx = 0
+    while idx < length(visible) {
+      let e = visible[idx]
+      if e.id == focus_id { set target = e break }
+      set idx = idx + 1
+    }
+  }
+
+  if target == null {
+    let weakest = weakest_visible_enemy()
+    if weakest != null { set target = weakest }
+  }
+  if target == null { set target = list_first(visible) }
+
+  if target == null {
+    // Nothing to shoot at. Occasionally fire a scan ping to refresh memory.
+    if chance(0.10) { scan(12) }
+    let cp = nearest_enemy_control_point()
+    if cp != null { move_to cp.position return }
+    move_forward
+    return
+  }
+
+  // Broadcast our pick to the squad so allies can pile on.
+  hive_set("focus", target.id)
+  if target.id != last_target {
+    log("new target ", target.id)
+    set last_target = target.id
+  }
+
+  // --- Stage 5: lead the shot. Predict where the target will be and fire
+  // there instead of where they currently are — ignoring lead is what lets
+  // low-skill bots miss stationary kites.
+  let aim = predict_position(target, LEAD_TICKS)
+  let d = distance_to(target.position)
+
+  if d > 14 {
+    move_toward target.position
+    return
+  }
+
+  if can_attack(target) and d < 3 {
+    attack target
+    return
+  }
+
+  // Occasional feint: 15% of eligible ticks, strafe instead of firing to
+  // break the enemy's aim solution. rand_float is deterministic per seed so
+  // matches stay reproducible even with the randomness.
+  if chance(FEINT_CHANCE) {
+    if rand_float(0, 1) < 0.5 { strafe_left } else { strafe_right }
+    return
+  }
+
+  if heat_percent() < 75 and ammo() > 2 {
+    fire_at aim
+  } else if heat_percent() >= 75 {
+    vent_heat
+  } else {
+    move_toward target.position
+  }
+}
+
+on damaged(event) {
+  // If we took a big hit, log the attacker id for post-match analysis.
+  if event.data.damage > 12 {
+    log("heavy hit from ", event.data.sourceId)
+  }
+}
+
+on destroyed {
+  // Announce our death so allies can shift focus; clears the stale hive key.
+  send_signal "predator_down"
+  hive_set("focus", null)
+}`,
+  },
 };
 
 const TEAM_PRESETS = {
@@ -1434,6 +1759,8 @@ const resultsRobotDetailEl = document.getElementById("results-robot-detail");
 const btnBookmarkDamage = document.getElementById("btn-bookmark-damage");
 const btnBookmarkKill = document.getElementById("btn-bookmark-kill");
 const btnToggleTraces = document.getElementById("btn-toggle-traces");
+const btnToggleVision = document.getElementById("btn-toggle-vision");
+const btnShareMatch = document.getElementById("btn-share-match");
 const btnToggleFullpage = document.getElementById("btn-toggle-fullpage");
 const btnOpenTeamBuilder = document.getElementById("btn-open-team-builder");
 const teamBuilderModal = document.getElementById("team-builder-modal");
@@ -1471,7 +1798,13 @@ let currentView = "builder";         // "builder" | "arena" | "library"
 let lastMatchResult = null;
 let lastCompileErrors = [];
 let showDecisionTraces = false;
+let showVisionOverlay = false;
 let fullPageBattle = false;
+// Bundle describing the last completed match so the Share button can emit a
+// URL-safe payload that other players can paste back into their editor to
+// reproduce the exact fight. Shape: { v:1, seed, arenaId, mode, participants:[
+// { source, teamId } | { preset, teamId } ] }. Null until the first match.
+let lastMatchBundle = null;
 
 // Replay state
 let replayData = null;
@@ -1758,6 +2091,50 @@ function jumpToLine(line) {
   syncScroll();
 }
 
+/**
+ * Extract a "Did you mean?" quick-fix from a diagnostic message. The semantic
+ * analyzer emits messages shaped like `Unknown identifier 'fooo'. Did you
+ * mean 'foo'?`. We pull the (wrong, right) pair so the UI can offer a
+ * one-click replacement.
+ */
+function extractQuickFix(message) {
+  if (typeof message !== "string") return null;
+  const m = message.match(/'([^']+)'[^']*Did you mean '([^']+)'/);
+  if (!m) return null;
+  return { wrong: m[1], right: m[2] };
+}
+
+/**
+ * Apply a quick-fix: replace the first occurrence of `wrong` at or after
+ * (line, col) in the editor with `right`. If we can't find the identifier
+ * there (e.g. the user has since edited the file), fall back to a simple
+ * string replace on the whole line. Returns true on success.
+ */
+function applyQuickFix(line, col, wrong, right) {
+  const src = editorEl.value;
+  const lines = src.split("\n");
+  const idx = Math.max(0, Math.min(lines.length - 1, (line || 1) - 1));
+  const target = lines[idx];
+  if (!target) return false;
+  // Match whole-word wrong, otherwise we might replace a substring inside
+  // another identifier. Use a char class for identifier boundary because
+  // JS \b treats "_" as a word char anyway.
+  const safe = wrong.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(^|[^A-Za-z0-9_])${safe}(?![A-Za-z0-9_])`);
+  const updated = target.replace(re, `$1${right}`);
+  if (updated === target) return false;
+  lines[idx] = updated;
+  editorEl.value = lines.join("\n");
+  onEditorInput();
+  // Position the caret at the replacement for convenience.
+  let cursor = 0;
+  for (let i = 0; i < idx; i++) cursor += lines[i].length + 1;
+  cursor += Math.max(0, updated.indexOf(right));
+  editorEl.focus();
+  editorEl.setSelectionRange(cursor, cursor + right.length);
+  return true;
+}
+
 function showErrors(errors) {
   if (!errors || errors.length === 0) {
     errorBarEl.classList.remove("visible");
@@ -1767,16 +2144,39 @@ function showErrors(errors) {
   }
   lastCompileErrors = errors;
   errorBarEl.classList.add("visible");
-  errorBarEl.innerHTML = errors.map(e => {
+  errorBarEl.innerHTML = errors.map((e, i) => {
     const safeLine = Number.isFinite(Number(e.line)) ? Number(e.line) : 0;
-    const lineNum = safeLine > 0 ? `<button type="button" class="error-line-num" data-line="${safeLine}">Ln ${safeLine}</button>` : "";
-    return `<div class="error-line-entry">${lineNum}${escapeHtml(e.message || String(e))}</div>`;
+    const safeCol = Number.isFinite(Number(e.column)) ? Number(e.column) : 0;
+    const lineNum = safeLine > 0
+      ? `<button type="button" class="error-line-num" data-line="${safeLine}">Ln ${safeLine}</button>`
+      : "";
+    const fix = extractQuickFix(e.message || "");
+    const fixBtn = fix
+      ? `<button type="button" class="error-quickfix" data-idx="${i}" data-line="${safeLine}" data-col="${safeCol}" data-wrong="${escapeHtml(fix.wrong)}" data-right="${escapeHtml(fix.right)}" title="Replace '${escapeHtml(fix.wrong)}' with '${escapeHtml(fix.right)}'">Apply fix: ${escapeHtml(fix.right)}</button>`
+      : "";
+    return `<div class="error-line-entry">${lineNum}${escapeHtml(e.message || String(e))}${fixBtn}</div>`;
   }).join("");
 
   errorBarEl.querySelectorAll(".error-line-num[data-line]").forEach((el) => {
     el.addEventListener("click", () => {
       const line = Number.parseInt(el.getAttribute("data-line"), 10);
       jumpToLine(line);
+    });
+  });
+  errorBarEl.querySelectorAll(".error-quickfix").forEach((el) => {
+    el.addEventListener("click", () => {
+      const line  = Number.parseInt(el.dataset.line, 10) || 0;
+      const col   = Number.parseInt(el.dataset.col,  10) || 0;
+      const wrong = el.dataset.wrong;
+      const right = el.dataset.right;
+      const ok = applyQuickFix(line, col, wrong, right);
+      if (ok) {
+        toast(`Applied fix: ${wrong} → ${right}`, "success");
+        // Re-compile so the error disappears immediately.
+        doCompile();
+      } else {
+        toast(`Could not locate '${wrong}' near line ${line}. You may have edited it already.`, "warn");
+      }
     });
   });
   updateLineNumbers();
@@ -1804,8 +2204,128 @@ function logToConsole(message, type = "info") {
   consoleEl.scrollTop = consoleEl.scrollHeight;
 }
 
+/**
+ * Flush the bot log sink collected during a match to the UI console.
+ * Each entry gets a `[tick][BotName]` prefix so authors can correlate log
+ * output with the replay scrubber. Capped so a runaway every {} timer can't
+ * freeze the DOM — the rest are summarised as an omitted count.
+ */
+function flushBotLogs(logs) {
+  if (!Array.isArray(logs) || logs.length === 0) return;
+  const max = 120;
+  const shown = logs.slice(0, max);
+  logToConsole(`--- Bot logs (${shown.length}${logs.length > max ? ` of ${logs.length}, truncated` : ""}) ---`, "event");
+  for (const entry of shown) {
+    const tick = String(entry.tick ?? 0).padStart(4, " ");
+    const name = entry.robotName ?? entry.robotId ?? "?";
+    logToConsole(`  [t=${tick}] ${name}: ${entry.message}`, "info");
+  }
+}
+
 function clearConsole() {
   consoleEl.innerHTML = "";
+}
+
+// ============================================================================
+// Match share bundle (export / import)
+// ============================================================================
+//
+// Shares are self-contained: the player receives base64-encoded JSON that the
+// app can rehydrate on any machine because match replays are deterministic for
+// a given seed + participant set. We prefix the payload with "asv1:" so we
+// can rev the format later without breaking old links.
+
+const SHARE_PREFIX = "asv1:";
+const SHARE_HASH_KEY = "match";
+
+function encodeShareBundle(bundle) {
+  const json = JSON.stringify(bundle);
+  // btoa() only accepts latin-1; encode UTF-8 first so non-ASCII bot sources
+  // round-trip safely. encodeURIComponent handles the conversion cleanly.
+  const utf8 = unescape(encodeURIComponent(json));
+  return SHARE_PREFIX + btoa(utf8);
+}
+
+function decodeShareBundle(token) {
+  if (typeof token !== "string") return null;
+  const clean = token.trim();
+  if (!clean.startsWith(SHARE_PREFIX)) return null;
+  try {
+    const raw = atob(clean.slice(SHARE_PREFIX.length));
+    const json = decodeURIComponent(escape(raw));
+    const parsed = JSON.parse(json);
+    if (parsed && parsed.v === 1 && Array.isArray(parsed.participants)) return parsed;
+  } catch (e) {
+    // Malformed payload — fall through to null so the caller can warn.
+  }
+  return null;
+}
+
+/** Build a share bundle from a running match request. */
+function buildMatchBundle(setup, participantSources) {
+  return {
+    v: 1,
+    seed: setup.config.seed,
+    arenaId: setup.config.arenaId,
+    mode: setup.config.mode,
+    participants: participantSources,
+  };
+}
+
+async function doShareMatch() {
+  if (!lastMatchBundle) {
+    toast("Run a match first so there is something to share.", "warn");
+    return;
+  }
+  const token = encodeShareBundle(lastMatchBundle);
+  // Prefer a shareable URL that re-hydrates on open; fall back to the raw
+  // token so users can paste it anywhere (issue comment, pastebin, etc.).
+  const url = `${location.origin}${location.pathname}#${SHARE_HASH_KEY}=${token}`;
+  const payload = url.length < 6000 ? url : token;
+  try {
+    await navigator.clipboard.writeText(payload);
+    toast(url.length < 6000 ? "Match URL copied to clipboard." : "Match bundle copied — paste anywhere.", "success");
+  } catch (e) {
+    // Clipboard may be blocked (no https, sandbox, denied permission). Fall
+    // back to prompt() so users can still copy manually.
+    prompt("Copy this match bundle:", payload);
+  }
+}
+
+/** Inspect location.hash for #match=... on load and offer to restore it. */
+function tryRestoreSharedMatch() {
+  const hash = location.hash;
+  if (!hash || !hash.startsWith(`#${SHARE_HASH_KEY}=`)) return;
+  const token = hash.slice(SHARE_HASH_KEY.length + 2);
+  const bundle = decodeShareBundle(token);
+  if (!bundle) {
+    toast("The shared match link is malformed or from an older format.", "error");
+    return;
+  }
+  // Clear the hash so reloading after edits doesn't keep re-applying the share.
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+  // Load the first participant into the editor so the user has an obvious
+  // starting point, then stash the bundle for re-run.
+  const first = bundle.participants[0];
+  if (first) {
+    const src = resolveBundleParticipantSource(first);
+    if (src) {
+      editorEl.value = src;
+      onEditorInput();
+    }
+  }
+  if (typeof bundle.seed === "number" && seedInput) {
+    seedInput.value = String(bundle.seed);
+  }
+  lastMatchBundle = bundle; // so Share re-emits the same link
+  if (btnShareMatch) btnShareMatch.disabled = false;
+  toast(`Shared match loaded (seed ${bundle.seed}). Hit Compile & Run to replay.`, "success");
+}
+
+function resolveBundleParticipantSource(p) {
+  if (p.source) return p.source;
+  if (p.preset && BOT_PRESETS[p.preset]) return BOT_PRESETS[p.preset].source;
+  return null;
 }
 
 // ============================================================================
@@ -2007,6 +2527,17 @@ async function doRunMatch() {
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
 
+  // Capture the share bundle: editor source on team 0, opponent preset on
+  // team 1. Squad mode default ally/enemy pair is reconstructable by preset
+  // key, so no extra source is stored for them. Players import this via
+  // `#match=asv1:...` to reproduce the exact fight.
+  const shareParticipants = [{ source: editorEl.value, teamId: 0 }];
+  if (mode === "squad_2v2") shareParticipants.push({ preset: "healer", teamId: 0 });
+  shareParticipants.push({ preset: oppKey, teamId: 1 });
+  if (mode === "squad_2v2") shareParticipants.push({ preset: "fortress", teamId: 1 });
+  lastMatchBundle = buildMatchBundle(setup, shareParticipants);
+  if (btnShareMatch) btnShareMatch.disabled = false;
+
   const winnerLabel =
     result.winner === null ? "DRAW" :
     result.winner === 0 ? "Your Bot" : oppPreset.name;
@@ -2017,6 +2548,7 @@ async function doRunMatch() {
   for (const [id, stats] of result.robotStats) {
     logToConsole(`  ${id}: dmg=${stats.damageDealt}  taken=${stats.damageTaken}  kills=${stats.kills}`, "stat");
   }
+  flushBotLogs(result.botLogs);
 
   // Record to the local match history so users can scroll back through
   // their recent runs. Stored in localStorage; wiped via a header button.
@@ -2042,6 +2574,169 @@ async function doRunMatch() {
 /** Yield one animation frame so the browser can paint pending UI. */
 function nextFrame() {
   return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+}
+
+// ============================================================================
+// Bot gauntlet: pit the current compiled bot against a slate of opponents
+// ============================================================================
+//
+// Pure wrapper around runMatch(): no language/engine changes. Ensures the UI
+// stays responsive by yielding a frame between simulations and short-circuits
+// when the user already has a match running. Records a single summary entry
+// in the match history (kind: "gauntlet") rather than flooding it with every
+// leg of the run.
+
+const GAUNTLET_SLATES = {
+  tutorial: ["rookie", "bruiser", "kiter"],
+  mixed: ["bruiser", "kiter", "fortress", "healer"],
+  advanced: ["phantom", "overclock", "oracle", "zealot"],
+  all: null, // sentinel — expanded at run time to every BOT_PRESETS key
+};
+
+let gauntletRunning = false;
+
+async function doRunGauntlet() {
+  if (gauntletRunning) {
+    toast("Gauntlet already running.", "warn");
+    return;
+  }
+  if (!compiledPlayer) {
+    logToConsole("Compile your bot before running the gauntlet.", "warn");
+    toast("Compile first (Ctrl+Enter).", "warn");
+    return;
+  }
+
+  const slateSel = document.getElementById("gauntlet-slate");
+  const seedsInput = document.getElementById("gauntlet-seeds");
+  const slateKey = slateSel?.value ?? "tutorial";
+  const baseSlate = GAUNTLET_SLATES[slateKey] ?? GAUNTLET_SLATES.tutorial;
+  const slate = (baseSlate === null ? Object.keys(BOT_PRESETS) : baseSlate)
+    .filter(k => BOT_PRESETS[k]);
+  // Exclude self so the user can't trivially draw against themselves when
+  // they've loaded a preset into the editor — the matchup is usually
+  // uninteresting and it frees time for a real opponent.
+  const editorName = compiledPlayer.program?.robotName ?? null;
+  const uniqueSlate = slate.filter(k => BOT_PRESETS[k].name !== editorName);
+  const seeds = Math.max(1, Math.min(10, Number.parseInt(seedsInput?.value ?? "3", 10) || 3));
+  const totalMatches = uniqueSlate.length * seeds;
+  if (totalMatches === 0) {
+    toast("Empty slate — pick a different gauntlet option.", "warn");
+    return;
+  }
+
+  // Pre-compile all opponents once so we don't pay the compile cost per match.
+  const opponents = [];
+  for (const key of uniqueSlate) {
+    try {
+      const c = compile(BOT_PRESETS[key].source);
+      if (!c.success) {
+        logToConsole(`Gauntlet: skipping ${key} (compile failed: ${c.errors.join(", ")})`, "warn");
+        continue;
+      }
+      opponents.push({ key, name: BOT_PRESETS[key].name, program: c.program, constants: c.constants });
+    } catch (e) {
+      logToConsole(`Gauntlet: skipping ${key} (${e.message})`, "warn");
+    }
+  }
+  if (opponents.length === 0) {
+    toast("No opponents compiled cleanly.", "error");
+    return;
+  }
+
+  gauntletRunning = true;
+  const btnGauntlet = document.getElementById("btn-run-gauntlet");
+  if (btnGauntlet) btnGauntlet.disabled = true;
+  showMatchLoading("Running gauntlet…", `0 / ${opponents.length * seeds}`);
+  logToConsole(`\n--- Gauntlet: ${opponents.length} opponents × ${seeds} seeds = ${opponents.length * seeds} matches ---`, "event");
+
+  const perOpponent = new Map(); // key -> { wins, losses, draws, errors, name }
+  for (const o of opponents) perOpponent.set(o.key, { name: o.name, wins: 0, losses: 0, draws: 0, errors: 0 });
+  let totals = { wins: 0, losses: 0, draws: 0, errors: 0 };
+  let matchIdx = 0;
+  const startedAt = Date.now();
+
+  // Using a fixed seed family (hash of opponent + seed index) so each slate
+  // run is reproducible given the same starting time slice.
+  const baseSeed = (Date.now() & 0x7fffffff) >>> 0;
+  let lastResult = null;
+
+  try {
+    for (const opp of opponents) {
+      for (let s = 0; s < seeds; s++) {
+        const seed = (baseSeed + matchIdx * 31 + s * 7) >>> 0;
+        const setup = {
+          config: {
+            mode: "duel_1v1",
+            arenaWidth: ARENA_WIDTH,
+            arenaHeight: ARENA_HEIGHT,
+            maxTicks: 3000,
+            tickRate: 30,
+            seed,
+            arenaId: getMatchArenaId(),
+          },
+          participants: [
+            { program: compiledPlayer.program, constants: compiledPlayer.constants, playerId: "player", teamId: 0 },
+            { program: opp.program, constants: opp.constants, playerId: opp.key, teamId: 1 },
+          ],
+        };
+        matchIdx++;
+        updateMatchLoading(`${matchIdx} / ${opponents.length * seeds} — vs ${opp.name}`);
+        // Yield so the loading overlay repaints. Running this many matches
+        // without yielding would freeze the browser.
+        await nextFrame();
+
+        let result;
+        try {
+          result = runMatch(setup);
+        } catch (e) {
+          perOpponent.get(opp.key).errors++;
+          totals.errors++;
+          logToConsole(`  [${matchIdx}] ${opp.name} seed=${seed}: ERROR ${e.message}`, "error");
+          continue;
+        }
+        lastResult = result;
+
+        const bucket = perOpponent.get(opp.key);
+        if (result.winner === null) { bucket.draws++; totals.draws++; }
+        else if (result.winner === 0) { bucket.wins++; totals.wins++; }
+        else { bucket.losses++; totals.losses++; }
+      }
+    }
+  } finally {
+    gauntletRunning = false;
+    if (btnGauntlet) btnGauntlet.disabled = false;
+    hideMatchLoading();
+  }
+
+  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+  const pct = (n, d) => d === 0 ? "0%" : `${Math.round((n / d) * 100)}%`;
+  const grandTotal = totals.wins + totals.losses + totals.draws;
+  logToConsole(`Gauntlet complete in ${elapsed}s — ${totals.wins}W / ${totals.losses}L / ${totals.draws}D (${pct(totals.wins, grandTotal || 1)} winrate)`, "success");
+  for (const [key, row] of perOpponent) {
+    const n = row.wins + row.losses + row.draws;
+    const err = row.errors > 0 ? ` · ${row.errors} errors` : "";
+    logToConsole(`  vs ${row.name.padEnd(12)} ${row.wins}W / ${row.losses}L / ${row.draws}D  (${pct(row.wins, n || 1)})${err}`, "stat");
+  }
+
+  // Persist a single aggregate entry so the history view shows gauntlets as
+  // their own distinct rows instead of 18+ noise entries.
+  try {
+    recordMatchHistory({
+      kind: "gauntlet",
+      you: compiledPlayer.program?.robotName ?? "Your Bot",
+      opponent: `Gauntlet: ${slateKey} (${opponents.length} foes × ${seeds})`,
+      arena: getMatchArenaId(),
+      mode: "gauntlet",
+      seed: baseSeed,
+      ticks: lastResult?.tickCount ?? 0,
+      winnerTeam: totals.wins > totals.losses ? 0 : (totals.losses > totals.wins ? 1 : null),
+      youWon: totals.wins > totals.losses,
+      reason: `${totals.wins}W/${totals.losses}L/${totals.draws}D`,
+    });
+  } catch (e) { /* non-fatal */ }
+  refreshMatchHistoryPanel();
+
+  toast(`Gauntlet: ${totals.wins}/${grandTotal} wins · see console for breakdown.`, totals.wins > totals.losses ? "success" : "info");
 }
 
 async function doRunTeamSimulation() {
@@ -2117,6 +2812,7 @@ async function doRunTeamSimulation() {
   const opponentName = teamPreset.name;
   logToConsole(`\n--- Team Simulation: ${teamPreset.name} ---`, "event");
   logToConsole(`Winner: ${result.winner === null ? "DRAW" : `Team ${result.winner}`} | ${result.reason}`, "success");
+  flushBotLogs(result.botLogs);
   showMatchResults(result, opponentName);
   startReplay(result, opponentName);
 }
@@ -2853,6 +3549,62 @@ function drawFrame(frame, labels, prevFrame) {
     }
   }
 
+  // Draw vision-overlay (if enabled): each alive robot's vision radius, a
+  // heading cone showing its facing direction, and a connecting line to the
+  // currently-selected target (inferred from the action). Meant as a debug
+  // aid so authors can see what the sensor layer is actually returning —
+  // "why isn't my bot firing?" is usually "because the enemy isn't visible".
+  if (showVisionOverlay) {
+    const s = canvasScale();
+    for (const r of frame.robots) {
+      if (r.health <= 0) continue;
+      const cs = CLASS_STATS[r.robotClass];
+      const vision = cs?.visionRange ?? 18;
+      const cx = r.position.x * s;
+      const cy = r.position.y * s;
+      const color = r.teamId === 0 ? "rgba(84,172,240," : "rgba(255,120,120,";
+      // Vision radius ring (dashed, subtle)
+      ctx.beginPath();
+      ctx.arc(cx, cy, vision * s, 0, Math.PI * 2);
+      ctx.strokeStyle = color + "0.35)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Heading cone (rough indicator of sensor priority direction)
+      if (r.heading) {
+        const ang = Math.atan2(r.heading.y, r.heading.x);
+        const cone = Math.PI / 2; // ±45° visual cone — not the actual FOV
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, vision * s, ang - cone, ang + cone);
+        ctx.closePath();
+        ctx.fillStyle = color + "0.08)";
+        ctx.fill();
+      }
+      // Target line — if the frame has a recorded combat target on this
+      // robot's action, draw a crosshair to show the current engagement.
+      const action = r.action;
+      if (action && action.target && typeof action.target === "object"
+          && "x" in action.target && "y" in action.target) {
+        const tx = action.target.x * s;
+        const ty = action.target.y * s;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(tx, ty);
+        ctx.strokeStyle = color + "0.5)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // Crosshair at the target point
+        ctx.beginPath();
+        ctx.arc(tx, ty, 1.2 * s, 0, Math.PI * 2);
+        ctx.strokeStyle = color + "0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+  }
+
   // Draw decision traces overlay (if enabled and available)
   if (showDecisionTraces && frame.traces) {
     const s = canvasScale();
@@ -3229,7 +3981,70 @@ editorEl.addEventListener("input", () => {
 
 editorEl.addEventListener("scroll", syncScroll);
 
+/**
+ * Editor key handling: indentation, bracket auto-close, smart Enter.
+ *
+ * The autocomplete popup installs its own `keydown` listener and pre-empts
+ * Tab / Enter / Escape while it's visible. Because DOM listeners fire in
+ * registration order, this handler runs first — so we check the popup's
+ * visibility up front and defer to it when open. That also closes a latent
+ * double-insert bug that existed before Phase 3 (Tab with autocomplete open
+ * would insert 2 spaces AND an accepted completion).
+ */
+const AUTO_CLOSE_PAIRS = { "(": ")", "[": "]", "{": "}", '"': '"' };
+
+function isAutocompleteOpen() {
+  const el = document.querySelector(".editor-autocomplete");
+  return !!(el && !el.hidden);
+}
+
+/**
+ * Count `"` characters before the caret on the current line so we don't
+ * auto-close a string inside another string (the heuristic used by the
+ * autocomplete gating earlier).
+ */
+function cursorIsInsideStringLiteral() {
+  const src = editorEl.value;
+  const pos = editorEl.selectionStart;
+  const lineStart = src.lastIndexOf("\n", pos - 1) + 1;
+  const prefix = src.slice(lineStart, pos);
+  let count = 0;
+  for (let i = 0; i < prefix.length; i++) {
+    if (prefix[i] === "\\") { i++; continue; } // skip escaped char
+    if (prefix[i] === '"') count++;
+  }
+  return count % 2 === 1;
+}
+
+/**
+ * Compute indentation (leading whitespace only) of the line containing `pos`.
+ * Returns the exact whitespace substring so we can preserve tabs or mixed
+ * indent if anyone somehow gets them in — the editor itself uses 2-space
+ * indent but we don't want to corrupt pasted code.
+ */
+function indentOfLine(src, pos) {
+  const lineStart = src.lastIndexOf("\n", pos - 1) + 1;
+  let i = lineStart;
+  while (i < src.length && (src[i] === " " || src[i] === "\t")) i++;
+  return src.slice(lineStart, i);
+}
+
+function insertAtCursor(text, caretOffsetFromEnd = 0) {
+  const start = editorEl.selectionStart;
+  const end = editorEl.selectionEnd;
+  editorEl.value = editorEl.value.slice(0, start) + text + editorEl.value.slice(end);
+  const newCaret = start + text.length - caretOffsetFromEnd;
+  editorEl.selectionStart = editorEl.selectionEnd = newCaret;
+  onEditorInput();
+}
+
 editorEl.addEventListener("keydown", (e) => {
+  // Defer to the autocomplete popup when it's up.
+  if (isAutocompleteOpen() && (e.key === "Tab" || e.key === "Enter" || e.key === "Escape"
+      || e.key === "ArrowUp" || e.key === "ArrowDown")) {
+    return;
+  }
+
   if (e.key === "Tab") {
     e.preventDefault();
     const start = editorEl.selectionStart;
@@ -3238,6 +4053,93 @@ editorEl.addEventListener("keydown", (e) => {
       editorEl.value.substring(0, start) + "  " + editorEl.value.substring(end);
     editorEl.selectionStart = editorEl.selectionEnd = start + 2;
     onEditorInput();
+    return;
+  }
+
+  // Smart Enter: preserve the current line's indent, and add one extra level
+  // when the previous non-whitespace char on the line is `{`. Skip when the
+  // user has a selection (Enter should replace selections normally).
+  if (e.key === "Enter" && !e.shiftKey && editorEl.selectionStart === editorEl.selectionEnd) {
+    const pos = editorEl.selectionStart;
+    const src = editorEl.value;
+    const baseIndent = indentOfLine(src, pos);
+    // Find the last non-whitespace char before the caret on the same line.
+    const lineStart = src.lastIndexOf("\n", pos - 1) + 1;
+    let j = pos - 1;
+    while (j >= lineStart && (src[j] === " " || src[j] === "\t")) j--;
+    const prevChar = j >= lineStart ? src[j] : "";
+    const nextChar = src[pos] ?? "";
+
+    if (prevChar === "{" && nextChar === "}") {
+      // { | }  ->  insert newline+indent+extra, newline+indent, keep caret in middle
+      e.preventDefault();
+      const extra = "  ";
+      const inserted = `\n${baseIndent}${extra}\n${baseIndent}`;
+      insertAtCursor(inserted, baseIndent.length + 1);
+      return;
+    }
+    if (prevChar === "{") {
+      e.preventDefault();
+      const extra = "  ";
+      insertAtCursor(`\n${baseIndent}${extra}`);
+      return;
+    }
+    if (baseIndent.length > 0) {
+      e.preventDefault();
+      insertAtCursor(`\n${baseIndent}`);
+      return;
+    }
+  }
+
+  // Auto-close brackets and quotes. Only fire when there's no selection —
+  // wrapping a selection would be a separate, more opinionated feature and
+  // can surprise users who expect the character to overwrite their selection.
+  if (editorEl.selectionStart === editorEl.selectionEnd && AUTO_CLOSE_PAIRS[e.key]) {
+    const opener = e.key;
+    const closer = AUTO_CLOSE_PAIRS[opener];
+    const src = editorEl.value;
+    const pos = editorEl.selectionStart;
+    const nextChar = src[pos] ?? "";
+
+    // Don't auto-pair a quote if the caret is already inside a string —
+    // the user is almost certainly closing it by hand.
+    if (opener === '"' && cursorIsInsideStringLiteral()) return;
+
+    // Don't auto-pair if the next character is an identifier char. Typing
+    // `(` before an existing `foo` usually means "wrap this call" and our
+    // simple heuristic would leave a stray `)` mid-expression.
+    if (/[A-Za-z0-9_]/.test(nextChar) && opener !== '"') return;
+
+    e.preventDefault();
+    insertAtCursor(opener + closer, 1);
+    return;
+  }
+
+  // Skip-over-closer: typing `)` when the caret sits on an auto-inserted `)`
+  // should move past it rather than inserting a second one. This is the
+  // canonical editor-UX pattern.
+  if ((e.key === ")" || e.key === "]" || e.key === "}" || e.key === '"')
+      && editorEl.selectionStart === editorEl.selectionEnd
+      && editorEl.value[editorEl.selectionStart] === e.key) {
+    e.preventDefault();
+    editorEl.selectionStart = editorEl.selectionEnd = editorEl.selectionStart + 1;
+    return;
+  }
+
+  // Backspace inside an empty pair deletes both sides.
+  if (e.key === "Backspace"
+      && editorEl.selectionStart === editorEl.selectionEnd
+      && editorEl.selectionStart > 0) {
+    const pos = editorEl.selectionStart;
+    const left = editorEl.value[pos - 1];
+    const right = editorEl.value[pos];
+    if (AUTO_CLOSE_PAIRS[left] === right) {
+      e.preventDefault();
+      editorEl.value = editorEl.value.slice(0, pos - 1) + editorEl.value.slice(pos + 1);
+      editorEl.selectionStart = editorEl.selectionEnd = pos - 1;
+      onEditorInput();
+      return;
+    }
   }
 });
 
@@ -3250,6 +4152,7 @@ btnRun.addEventListener("click", doRunMatch);
 btnCompileRun.addEventListener("click", doCompileAndRun);
 btnClear.addEventListener("click", clearConsole);
 btnRunTeamSim?.addEventListener("click", doRunTeamSimulation);
+document.getElementById("btn-run-gauntlet")?.addEventListener("click", doRunGauntlet);
 
 presetButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -3544,6 +4447,7 @@ function tbRunBattle() {
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
   logToConsole(`Winner: ${result.winner === null ? "DRAW" : `Team ${result.winner}`} | ${result.reason} | ${result.tickCount} ticks`, "success");
+  flushBotLogs(result.botLogs);
   showMatchResults(result, "Enemy Team");
   startReplay(result, "Team Battle");
 }
@@ -3588,6 +4492,118 @@ function toggleDecisionTraces() {
   }
 }
 
+function toggleVisionOverlay() {
+  showVisionOverlay = !showVisionOverlay;
+  btnToggleVision?.classList.toggle("active", showVisionOverlay);
+  if (replayData && replayData[replayFrameIndex]) {
+    drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
+  }
+}
+
+// --- Canvas hover inspector -------------------------------------------------
+//
+// Hover the canvas during a replay to inspect the robot under the cursor.
+// We reuse the current replay frame rather than listening to engine state so
+// the tooltip stays correct while scrubbing or paused. Pure read-only — no
+// frame mutation — so this can't break rendering or determinism.
+
+const canvasTooltipEl = (() => {
+  if (typeof document === "undefined") return null;
+  const el = document.createElement("div");
+  el.className = "canvas-tooltip";
+  el.hidden = true;
+  document.body.appendChild(el);
+  return el;
+})();
+
+function currentReplayFrame() {
+  if (!replayData || replayData.length === 0) return null;
+  const idx = Math.min(replayFrameIndex, replayData.length - 1);
+  return replayData[idx] ?? null;
+}
+
+/** Pixel -> arena coord, accounting for CSS scaling of the canvas. */
+function canvasPxToArena(clientX, clientY) {
+  const rect = canvasEl.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  const pxX = (clientX - rect.left) * (canvasEl.width / rect.width);
+  const pxY = (clientY - rect.top)  * (canvasEl.height / rect.height);
+  const s = canvasScale();
+  if (s === 0) return null;
+  const { ox, oy } = canvasOffset();
+  return { x: (pxX - ox) / s, y: (pxY - oy) / s };
+}
+
+function findRobotAt(frame, arenaX, arenaY, maxArenaDist = 3) {
+  if (!frame || !frame.robots) return null;
+  let best = null;
+  let bestDist = maxArenaDist;
+  for (const r of frame.robots) {
+    if (r.health <= 0) continue;
+    const dx = r.position.x - arenaX;
+    const dy = r.position.y - arenaY;
+    const d = Math.hypot(dx, dy);
+    if (d < bestDist) { bestDist = d; best = r; }
+  }
+  return best;
+}
+
+function formatAction(action) {
+  if (!action) return "idle";
+  if (typeof action === "string") return action;
+  if (typeof action !== "object") return String(action);
+  const type = action.type ?? "?";
+  if (action.target && typeof action.target === "object" && "x" in action.target) {
+    return `${type} → (${Math.round(action.target.x)}, ${Math.round(action.target.y)})`;
+  }
+  if (action.target) return `${type} → ${action.target}`;
+  return type;
+}
+
+function hideCanvasTooltip() {
+  if (canvasTooltipEl) canvasTooltipEl.hidden = true;
+}
+
+canvasEl?.addEventListener("mousemove", (e) => {
+  if (!canvasTooltipEl) return;
+  const frame = currentReplayFrame();
+  if (!frame) { hideCanvasTooltip(); return; }
+  const arena = canvasPxToArena(e.clientX, e.clientY);
+  if (!arena) { hideCanvasTooltip(); return; }
+  const hit = findRobotAt(frame, arena.x, arena.y, 3.5);
+  if (!hit) { hideCanvasTooltip(); return; }
+
+  const label = replayLabels?.[hit.id] ?? hit.id;
+  const cs = CLASS_STATS[hit.robotClass];
+  const maxHP = cs?.health ?? 100;
+  const hpPct = Math.max(0, Math.min(100, Math.round((hit.health / maxHP) * 100)));
+  const team = hit.teamId === 0 ? "team 0" : "team 1";
+  const cloak = hit.cloaked ? " · cloaked" : "";
+  const heat = cs?.maxHeat !== undefined && hit.heat !== undefined ? ` · heat ${Math.round(hit.heat)}` : "";
+  const action = formatAction(hit.action);
+
+  canvasTooltipEl.innerHTML = `
+    <div class="ct-row ct-title">
+      <span class="ct-team team-${hit.teamId}">${team}</span>
+      <b>${escapeHtml(label)}</b>
+      <span class="ct-class">${escapeHtml(hit.robotClass ?? "")}</span>
+    </div>
+    <div class="ct-row">HP <b>${hit.health}</b> / ${maxHP} (${hpPct}%)</div>
+    <div class="ct-row">tick <b>${frame.tick ?? 0}</b> · ${escapeHtml(action)}${cloak}${heat}</div>
+  `;
+  // Anchor to the cursor but flip to the left if near the right edge.
+  const pad = 12;
+  const rect = canvasTooltipEl.getBoundingClientRect();
+  const desiredW = Math.max(rect.width, 220);
+  let x = e.clientX + pad;
+  if (x + desiredW > window.innerWidth - 8) x = e.clientX - desiredW - pad;
+  canvasTooltipEl.style.left = `${Math.max(8, x)}px`;
+  canvasTooltipEl.style.top = `${e.clientY + pad}px`;
+  canvasTooltipEl.hidden = false;
+});
+
+canvasEl?.addEventListener("mouseleave", hideCanvasTooltip);
+
 // Wire Team Builder modal
 btnOpenTeamBuilder?.addEventListener("click", tbOpenModal);
 btnCloseTeamBuilder?.addEventListener("click", tbCloseModal);
@@ -3614,6 +4630,8 @@ document.addEventListener("keydown", (e) => {
 
 // Wire Arena toggles
 btnToggleTraces?.addEventListener("click", toggleDecisionTraces);
+btnToggleVision?.addEventListener("click", toggleVisionOverlay);
+btnShareMatch?.addEventListener("click", doShareMatch);
 btnToggleFullpage?.addEventListener("click", toggleFullPageBattle);
 
 // Wire match-live exit button
@@ -4366,6 +5384,22 @@ document.getElementById("btn-match-history-clear")?.addEventListener("click", ()
 
 installShortcutHelp();
 installLangReference();
+installEditorAutocomplete(editorEl, () => {
+  // Re-run syntax highlight + diagnostic rebuild after a completion accept
+  // so the inserted text is styled immediately.
+  onEditorInput();
+});
+installOnboarding({
+  loadBot: (key) => {
+    loadPreset(key);
+    setView("builder");
+  },
+});
+
+// If the page was opened with a #match=asv1:... hash, try to rehydrate the
+// shared match so the opener can reproduce it with one click. Runs after
+// other UI is wired so toast() and editor state are ready.
+tryRestoreSharedMatch();
 
 installCommandPalette(() => {
   // Build the command list dynamically so newly saved user bots, current
@@ -4390,6 +5424,20 @@ installCommandPalette(() => {
     label: "Save current editor program to library",
     keywords: ["save"],
     run: () => document.getElementById("btn-save-library")?.click(),
+  });
+  cmds.push({
+    kind: "action", icon: "🔗",
+    label: "Share last match (copy link to clipboard)",
+    hint: lastMatchBundle ? `seed ${lastMatchBundle.seed}` : "run a match first",
+    keywords: ["share", "copy", "replay", "link", "export"],
+    run: () => doShareMatch(),
+  });
+  cmds.push({
+    kind: "match", icon: "🏆",
+    label: "Run gauntlet against preset slate",
+    hint: "your bot vs N opponents",
+    keywords: ["gauntlet", "benchmark", "winrate", "test"],
+    run: () => doRunGauntlet(),
   });
   cmds.push({
     kind: "action", icon: "🗑",

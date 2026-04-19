@@ -58,7 +58,11 @@ export function runMatch(setup) {
   const world = new World(config);
   initializeArenaLayout(world);
   const visibilityTracker = new VisibilityTracker();
-  const sensorGateway = createSensorGateway(world);
+  // Shared log sink for all VMs in this match. Surfaced back to the caller
+  // (and from there to the UI console) so bots can print debug traces via
+  // log(...) without any per-match plumbing on the client side.
+  const botLogs = [];
+  const sensorGateway = createSensorGateway(world, { logs: botLogs });
 
   // Track stats per robot
   const robotStats = new Map();
@@ -398,6 +402,7 @@ export function runMatch(setup) {
     tickCount: world.currentTick + 1,
     replay: replayWriter.finalize(),
     robotStats,
+    botLogs,
   };
 }
 

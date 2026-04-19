@@ -803,6 +803,47 @@ on tick {
 }
 ```
 
+## Beta stdlib extensions
+
+These sensors shipped in the beta expansion pass. They are fully deterministic and available anywhere a built-in sensor can be called.
+
+### Debug / introspection
+
+- `log(message, [value])` — Emits a line to the UI console after the match completes. Entries are prefixed with the bot name and tick index, making it easy to correlate state-machine transitions with the replay scrubber. Returns `null`. Capped at 500 entries per match; gate with `every N { ... }` or an `if` to avoid flooding the output.
+
+```
+on damaged(event) {
+  log("hit for", event.data.damage)
+}
+```
+
+### List helpers
+
+- `list_contains(list, x)` — True if `x` is in the list. Entity handles are matched by `id`.
+- `index_of(list, x)` — Zero-based index of the first matching element, or `-1`.
+- `list_first(list)` / `list_last(list)` — Return the first or last element, or `null` if empty.
+- `list_sum(list)` — Sum the numeric elements. Non-numbers coerce to zero.
+
+### String helpers
+
+- `string_contains(str, sub)` — Substring test. Empty `sub` is always true (mirrors JS semantics).
+- `starts_with(str, prefix)` — Prefix match.
+- `ends_with(str, suffix)` — Suffix match.
+
+### Extended random
+
+- `rand_float(lo, hi)` — Uniform float in `[lo, hi)`. Deterministic under the match seed.
+- `chance(p)` — Returns `true` with probability `p` (clamped to 0..1). Convenience wrapper for `rand_float(0, 1) < p`.
+
+### Extended vector / numeric
+
+- `hypot(x, y)` — `sqrt(x*x + y*y)`.
+- `mod(a, b)` — Mathematical modulo (result always non-negative when `b > 0`). Safer than `a % b` for rotation logic.
+- `dot(a, b)` — Vector dot product.
+- `normalize(v)` — Unit-length version of `v`. The zero vector normalizes to `(0, 0)`.
+- `vec_add(a, b)` — Component-wise sum.
+- `vec_scale(v, s)` — Scalar multiply.
+
 ## Execution Limits
 
 To ensure fair play, each robot has a per-tick budget:

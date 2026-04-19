@@ -232,6 +232,35 @@ export const LANG_REFERENCE = [
       { name: "make_position(x, y)", desc: "Build a position object clamped to arena bounds." },
       { name: "length(list) / list_empty(list)", sig: "v1.1", desc: "List length + emptiness check. Also: `list.length` short-hand." },
       { name: "random(lo, hi)", desc: "Integer in [lo, hi]. Deterministic per match seed." },
+      { name: "rand_float(lo, hi)", sig: "beta", desc: "Uniform float in [lo, hi). Deterministic per match seed." },
+      { name: "chance(p)", sig: "beta — -> boolean", desc: "True with probability p (0..1). Convenience wrapper for stochastic branching." },
+      { name: "hypot(x, y) / mod(a, b)", sig: "beta", desc: "`mod` returns a mathematical remainder (always non-negative). `hypot` is sqrt(x² + y²)." },
+      { name: "dot(a, b) / normalize(v)", sig: "beta", desc: "Vector dot product; unit-length normalization. Zero-vector normalizes to (0,0)." },
+      { name: "vec_add(a, b) / vec_scale(v, s)", sig: "beta", desc: "Compose vectors without reaching into x/y by hand." },
+    ],
+  },
+  {
+    id: "stdlib",
+    label: "Lists & strings",
+    entries: [
+      { name: "list_contains(list, x)", sig: "beta — -> boolean", desc: "True if `x` is an element. Matches entities by id." },
+      { name: "index_of(list, x)", sig: "beta — -> number", desc: "Zero-based index of the first match, or -1." },
+      { name: "list_first(list) / list_last(list)", sig: "beta", desc: "Ergonomic shortcuts for [0] and [-1]. Return null when empty." },
+      { name: "list_sum(list)", sig: "beta — -> number", desc: "Sum the numeric values in a list. Non-numeric entries coerce to 0." },
+      { name: "string_contains(str, sub)", sig: "beta — -> boolean", desc: "Substring test. An empty needle is always true." },
+      { name: "starts_with(str, prefix) / ends_with(str, suffix)", sig: "beta", desc: "Prefix / suffix match. Useful when parsing signal payloads." },
+    ],
+  },
+  {
+    id: "debug",
+    label: "Debug",
+    entries: [
+      {
+        name: "log(msg, [value])",
+        sig: "beta — diagnostic",
+        desc: "Prints to the UI console after the match, prefixed with the bot name and tick. No effect on simulation state. Capped at 500 lines per match; use `every N` or `if` to gate noisy logs.",
+        example: `on tick {\n  if threat_level() > 60 {\n    log("PANIC hp=" + health())\n  }\n}`,
+      },
     ],
   },
 ];
