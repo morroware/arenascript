@@ -1276,6 +1276,25 @@ on tick {
   assert.ok(messages.some(m => m.includes("tick=")), "tick log missing");
 }
 
+function testDidYouMeanMessageShapeForQuickFix() {
+  // The in-editor quick-fix button depends on the exact shape of
+  //   `...'WRONG'...Did you mean 'RIGHT'?`
+  // If a refactor changes the wording, this test breaks fast so the UI
+  // doesn't silently stop offering fixes.
+  const src = `robot "Tfx" version "1.0"
+on tick {
+  let x = healt()
+}`;
+  const r = compile(src);
+  assert.ok(!r.success, "expected the compile to fail");
+  const err = r.diagnostics.find(d => /Unknown function/.test(d.message));
+  assert.ok(err, "expected an 'Unknown function' diagnostic");
+  const m = err.message.match(/'([^']+)'[^']*Did you mean '([^']+)'/);
+  assert.ok(m, `quick-fix regex should extract wrong + right, got: ${err.message}`);
+  assert.equal(m[1], "healt");
+  assert.equal(m[2], "health");
+}
+
 function testModReturnsNonNegative() {
   const source = `robot "ModTest" version "1.0"
 state { m: number = 0 }
@@ -1624,6 +1643,7 @@ function run() {
     testMathBuiltinsRuntime,
     testBetaStdlibCompiles,
     testLogWritesToSink,
+    testDidYouMeanMessageShapeForQuickFix,
     testModReturnsNonNegative,
     testTacticsHelpersCompile,
     testMakePositionBuiltin,

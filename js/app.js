@@ -1759,6 +1759,8 @@ const resultsRobotDetailEl = document.getElementById("results-robot-detail");
 const btnBookmarkDamage = document.getElementById("btn-bookmark-damage");
 const btnBookmarkKill = document.getElementById("btn-bookmark-kill");
 const btnToggleTraces = document.getElementById("btn-toggle-traces");
+const btnToggleVision = document.getElementById("btn-toggle-vision");
+const btnShareMatch = document.getElementById("btn-share-match");
 const btnToggleFullpage = document.getElementById("btn-toggle-fullpage");
 const btnOpenTeamBuilder = document.getElementById("btn-open-team-builder");
 const teamBuilderModal = document.getElementById("team-builder-modal");
@@ -1796,7 +1798,13 @@ let currentView = "builder";         // "builder" | "arena" | "library"
 let lastMatchResult = null;
 let lastCompileErrors = [];
 let showDecisionTraces = false;
+let showVisionOverlay = false;
 let fullPageBattle = false;
+// Bundle describing the last completed match so the Share button can emit a
+// URL-safe payload that other players can paste back into their editor to
+// reproduce the exact fight. Shape: { v:1, seed, arenaId, mode, participants:[
+// { source, teamId } | { preset, teamId } ] }. Null until the first match.
+let lastMatchBundle = null;
 
 // Replay state
 let replayData = null;
@@ -2083,6 +2091,50 @@ function jumpToLine(line) {
   syncScroll();
 }
 
+/**
+ * Extract a "Did you mean?" quick-fix from a diagnostic message. The semantic
+ * analyzer emits messages shaped like `Unknown identifier 'fooo'. Did you
+ * mean 'foo'?`. We pull the (wrong, right) pair so the UI can offer a
+ * one-click replacement.
+ */
+function extractQuickFix(message) {
+  if (typeof message !== "string") return null;
+  const m = message.match(/'([^']+)'[^']*Did you mean '([^']+)'/);
+  if (!m) return null;
+  return { wrong: m[1], right: m[2] };
+}
+
+/**
+ * Apply a quick-fix: replace the first occurrence of `wrong` at or after
+ * (line, col) in the editor with `right`. If we can't find the identifier
+ * there (e.g. the user has since edited the file), fall back to a simple
+ * string replace on the whole line. Returns true on success.
+ */
+function applyQuickFix(line, col, wrong, right) {
+  const src = editorEl.value;
+  const lines = src.split("\n");
+  const idx = Math.max(0, Math.min(lines.length - 1, (line || 1) - 1));
+  const target = lines[idx];
+  if (!target) return false;
+  // Match whole-word wrong, otherwise we might replace a substring inside
+  // another identifier. Use a char class for identifier boundary because
+  // JS \b treats "_" as a word char anyway.
+  const safe = wrong.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(^|[^A-Za-z0-9_])${safe}(?![A-Za-z0-9_])`);
+  const updated = target.replace(re, `$1${right}`);
+  if (updated === target) return false;
+  lines[idx] = updated;
+  editorEl.value = lines.join("\n");
+  onEditorInput();
+  // Position the caret at the replacement for convenience.
+  let cursor = 0;
+  for (let i = 0; i < idx; i++) cursor += lines[i].length + 1;
+  cursor += Math.max(0, updated.indexOf(right));
+  editorEl.focus();
+  editorEl.setSelectionRange(cursor, cursor + right.length);
+  return true;
+}
+
 function showErrors(errors) {
   if (!errors || errors.length === 0) {
     errorBarEl.classList.remove("visible");
@@ -2092,16 +2144,39 @@ function showErrors(errors) {
   }
   lastCompileErrors = errors;
   errorBarEl.classList.add("visible");
-  errorBarEl.innerHTML = errors.map(e => {
+  errorBarEl.innerHTML = errors.map((e, i) => {
     const safeLine = Number.isFinite(Number(e.line)) ? Number(e.line) : 0;
-    const lineNum = safeLine > 0 ? `<button type="button" class="error-line-num" data-line="${safeLine}">Ln ${safeLine}</button>` : "";
-    return `<div class="error-line-entry">${lineNum}${escapeHtml(e.message || String(e))}</div>`;
+    const safeCol = Number.isFinite(Number(e.column)) ? Number(e.column) : 0;
+    const lineNum = safeLine > 0
+      ? `<button type="button" class="error-line-num" data-line="${safeLine}">Ln ${safeLine}</button>`
+      : "";
+    const fix = extractQuickFix(e.message || "");
+    const fixBtn = fix
+      ? `<button type="button" class="error-quickfix" data-idx="${i}" data-line="${safeLine}" data-col="${safeCol}" data-wrong="${escapeHtml(fix.wrong)}" data-right="${escapeHtml(fix.right)}" title="Replace '${escapeHtml(fix.wrong)}' with '${escapeHtml(fix.right)}'">Apply fix: ${escapeHtml(fix.right)}</button>`
+      : "";
+    return `<div class="error-line-entry">${lineNum}${escapeHtml(e.message || String(e))}${fixBtn}</div>`;
   }).join("");
 
   errorBarEl.querySelectorAll(".error-line-num[data-line]").forEach((el) => {
     el.addEventListener("click", () => {
       const line = Number.parseInt(el.getAttribute("data-line"), 10);
       jumpToLine(line);
+    });
+  });
+  errorBarEl.querySelectorAll(".error-quickfix").forEach((el) => {
+    el.addEventListener("click", () => {
+      const line  = Number.parseInt(el.dataset.line, 10) || 0;
+      const col   = Number.parseInt(el.dataset.col,  10) || 0;
+      const wrong = el.dataset.wrong;
+      const right = el.dataset.right;
+      const ok = applyQuickFix(line, col, wrong, right);
+      if (ok) {
+        toast(`Applied fix: ${wrong} → ${right}`, "success");
+        // Re-compile so the error disappears immediately.
+        doCompile();
+      } else {
+        toast(`Could not locate '${wrong}' near line ${line}. You may have edited it already.`, "warn");
+      }
     });
   });
   updateLineNumbers();
@@ -2149,6 +2224,108 @@ function flushBotLogs(logs) {
 
 function clearConsole() {
   consoleEl.innerHTML = "";
+}
+
+// ============================================================================
+// Match share bundle (export / import)
+// ============================================================================
+//
+// Shares are self-contained: the player receives base64-encoded JSON that the
+// app can rehydrate on any machine because match replays are deterministic for
+// a given seed + participant set. We prefix the payload with "asv1:" so we
+// can rev the format later without breaking old links.
+
+const SHARE_PREFIX = "asv1:";
+const SHARE_HASH_KEY = "match";
+
+function encodeShareBundle(bundle) {
+  const json = JSON.stringify(bundle);
+  // btoa() only accepts latin-1; encode UTF-8 first so non-ASCII bot sources
+  // round-trip safely. encodeURIComponent handles the conversion cleanly.
+  const utf8 = unescape(encodeURIComponent(json));
+  return SHARE_PREFIX + btoa(utf8);
+}
+
+function decodeShareBundle(token) {
+  if (typeof token !== "string") return null;
+  const clean = token.trim();
+  if (!clean.startsWith(SHARE_PREFIX)) return null;
+  try {
+    const raw = atob(clean.slice(SHARE_PREFIX.length));
+    const json = decodeURIComponent(escape(raw));
+    const parsed = JSON.parse(json);
+    if (parsed && parsed.v === 1 && Array.isArray(parsed.participants)) return parsed;
+  } catch (e) {
+    // Malformed payload — fall through to null so the caller can warn.
+  }
+  return null;
+}
+
+/** Build a share bundle from a running match request. */
+function buildMatchBundle(setup, participantSources) {
+  return {
+    v: 1,
+    seed: setup.config.seed,
+    arenaId: setup.config.arenaId,
+    mode: setup.config.mode,
+    participants: participantSources,
+  };
+}
+
+async function doShareMatch() {
+  if (!lastMatchBundle) {
+    toast("Run a match first so there is something to share.", "warn");
+    return;
+  }
+  const token = encodeShareBundle(lastMatchBundle);
+  // Prefer a shareable URL that re-hydrates on open; fall back to the raw
+  // token so users can paste it anywhere (issue comment, pastebin, etc.).
+  const url = `${location.origin}${location.pathname}#${SHARE_HASH_KEY}=${token}`;
+  const payload = url.length < 6000 ? url : token;
+  try {
+    await navigator.clipboard.writeText(payload);
+    toast(url.length < 6000 ? "Match URL copied to clipboard." : "Match bundle copied — paste anywhere.", "success");
+  } catch (e) {
+    // Clipboard may be blocked (no https, sandbox, denied permission). Fall
+    // back to prompt() so users can still copy manually.
+    prompt("Copy this match bundle:", payload);
+  }
+}
+
+/** Inspect location.hash for #match=... on load and offer to restore it. */
+function tryRestoreSharedMatch() {
+  const hash = location.hash;
+  if (!hash || !hash.startsWith(`#${SHARE_HASH_KEY}=`)) return;
+  const token = hash.slice(SHARE_HASH_KEY.length + 2);
+  const bundle = decodeShareBundle(token);
+  if (!bundle) {
+    toast("The shared match link is malformed or from an older format.", "error");
+    return;
+  }
+  // Clear the hash so reloading after edits doesn't keep re-applying the share.
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+  // Load the first participant into the editor so the user has an obvious
+  // starting point, then stash the bundle for re-run.
+  const first = bundle.participants[0];
+  if (first) {
+    const src = resolveBundleParticipantSource(first);
+    if (src) {
+      editorEl.value = src;
+      onEditorInput();
+    }
+  }
+  if (typeof bundle.seed === "number" && seedInput) {
+    seedInput.value = String(bundle.seed);
+  }
+  lastMatchBundle = bundle; // so Share re-emits the same link
+  if (btnShareMatch) btnShareMatch.disabled = false;
+  toast(`Shared match loaded (seed ${bundle.seed}). Hit Compile & Run to replay.`, "success");
+}
+
+function resolveBundleParticipantSource(p) {
+  if (p.source) return p.source;
+  if (p.preset && BOT_PRESETS[p.preset]) return BOT_PRESETS[p.preset].source;
+  return null;
 }
 
 // ============================================================================
@@ -2349,6 +2526,17 @@ async function doRunMatch() {
 
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
+
+  // Capture the share bundle: editor source on team 0, opponent preset on
+  // team 1. Squad mode default ally/enemy pair is reconstructable by preset
+  // key, so no extra source is stored for them. Players import this via
+  // `#match=asv1:...` to reproduce the exact fight.
+  const shareParticipants = [{ source: editorEl.value, teamId: 0 }];
+  if (mode === "squad_2v2") shareParticipants.push({ preset: "healer", teamId: 0 });
+  shareParticipants.push({ preset: oppKey, teamId: 1 });
+  if (mode === "squad_2v2") shareParticipants.push({ preset: "fortress", teamId: 1 });
+  lastMatchBundle = buildMatchBundle(setup, shareParticipants);
+  if (btnShareMatch) btnShareMatch.disabled = false;
 
   const winnerLabel =
     result.winner === null ? "DRAW" :
@@ -3198,6 +3386,62 @@ function drawFrame(frame, labels, prevFrame) {
     }
   }
 
+  // Draw vision-overlay (if enabled): each alive robot's vision radius, a
+  // heading cone showing its facing direction, and a connecting line to the
+  // currently-selected target (inferred from the action). Meant as a debug
+  // aid so authors can see what the sensor layer is actually returning —
+  // "why isn't my bot firing?" is usually "because the enemy isn't visible".
+  if (showVisionOverlay) {
+    const s = canvasScale();
+    for (const r of frame.robots) {
+      if (r.health <= 0) continue;
+      const cs = CLASS_STATS[r.robotClass];
+      const vision = cs?.visionRange ?? 18;
+      const cx = r.position.x * s;
+      const cy = r.position.y * s;
+      const color = r.teamId === 0 ? "rgba(84,172,240," : "rgba(255,120,120,";
+      // Vision radius ring (dashed, subtle)
+      ctx.beginPath();
+      ctx.arc(cx, cy, vision * s, 0, Math.PI * 2);
+      ctx.strokeStyle = color + "0.35)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Heading cone (rough indicator of sensor priority direction)
+      if (r.heading) {
+        const ang = Math.atan2(r.heading.y, r.heading.x);
+        const cone = Math.PI / 2; // ±45° visual cone — not the actual FOV
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, vision * s, ang - cone, ang + cone);
+        ctx.closePath();
+        ctx.fillStyle = color + "0.08)";
+        ctx.fill();
+      }
+      // Target line — if the frame has a recorded combat target on this
+      // robot's action, draw a crosshair to show the current engagement.
+      const action = r.action;
+      if (action && action.target && typeof action.target === "object"
+          && "x" in action.target && "y" in action.target) {
+        const tx = action.target.x * s;
+        const ty = action.target.y * s;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(tx, ty);
+        ctx.strokeStyle = color + "0.5)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        // Crosshair at the target point
+        ctx.beginPath();
+        ctx.arc(tx, ty, 1.2 * s, 0, Math.PI * 2);
+        ctx.strokeStyle = color + "0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+  }
+
   // Draw decision traces overlay (if enabled and available)
   if (showDecisionTraces && frame.traces) {
     const s = canvasScale();
@@ -3934,6 +4178,14 @@ function toggleDecisionTraces() {
   }
 }
 
+function toggleVisionOverlay() {
+  showVisionOverlay = !showVisionOverlay;
+  btnToggleVision?.classList.toggle("active", showVisionOverlay);
+  if (replayData && replayData[replayFrameIndex]) {
+    drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
+  }
+}
+
 // Wire Team Builder modal
 btnOpenTeamBuilder?.addEventListener("click", tbOpenModal);
 btnCloseTeamBuilder?.addEventListener("click", tbCloseModal);
@@ -3960,6 +4212,8 @@ document.addEventListener("keydown", (e) => {
 
 // Wire Arena toggles
 btnToggleTraces?.addEventListener("click", toggleDecisionTraces);
+btnToggleVision?.addEventListener("click", toggleVisionOverlay);
+btnShareMatch?.addEventListener("click", doShareMatch);
 btnToggleFullpage?.addEventListener("click", toggleFullPageBattle);
 
 // Wire match-live exit button
@@ -4724,6 +4978,11 @@ installOnboarding({
   },
 });
 
+// If the page was opened with a #match=asv1:... hash, try to rehydrate the
+// shared match so the opener can reproduce it with one click. Runs after
+// other UI is wired so toast() and editor state are ready.
+tryRestoreSharedMatch();
+
 installCommandPalette(() => {
   // Build the command list dynamically so newly saved user bots, current
   // view state, etc. are reflected each time the palette opens.
@@ -4747,6 +5006,13 @@ installCommandPalette(() => {
     label: "Save current editor program to library",
     keywords: ["save"],
     run: () => document.getElementById("btn-save-library")?.click(),
+  });
+  cmds.push({
+    kind: "action", icon: "🔗",
+    label: "Share last match (copy link to clipboard)",
+    hint: lastMatchBundle ? `seed ${lastMatchBundle.seed}` : "run a match first",
+    keywords: ["share", "copy", "replay", "link", "export"],
+    run: () => doShareMatch(),
   });
   cmds.push({
     kind: "action", icon: "🗑",
