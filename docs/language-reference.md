@@ -270,7 +270,18 @@ set mode = "attack"
 set damage_count = damage_count + 1
 ```
 
-You cannot use `let` to modify state variables or `set` to create local variables.
+You cannot use `let` to modify an existing variable (it declares a new one).
+As of **v1.1**, `set` also reassigns locals declared with `let` — which
+makes `while`-loop counters possible:
+
+```
+let i = 0
+while i < 5 {
+  set i = i + 1  // mutates the local, not a state var
+}
+```
+
+Constants declared in `const { ... }` remain immutable and cannot be `set`.
 
 ## Types
 
@@ -289,10 +300,10 @@ You cannot use `let` to modify state variables or `set` to create local variable
 
 | Op | Description |
 |----|-------------|
-| `+` | Addition |
+| `+` | Addition. Also string concatenation (v1.1) when either side is a string: `"hp=" + health()` |
 | `-` | Subtraction / negation |
 | `*` | Multiplication |
-| `/` | Division |
+| `/` | Division (division by zero yields `0`) |
 | `%` | Modulo |
 
 ### Comparison
@@ -337,6 +348,47 @@ for enemy in visible_enemies() {
     return
   }
 }
+```
+
+### While Loops (v1.1)
+
+`while` keeps executing the body as long as the condition is truthy. The
+per-tick instruction budget still applies, so `while true { ... }` without
+a `break` will blow the budget and drop the tick. The semantic analyzer
+warns on that pattern.
+
+```
+let i = 0
+while i < 5 {
+  if i == 3 { break }
+  set i = i + 1
+}
+```
+
+### Break / Continue (v1.1)
+
+`break` exits the nearest enclosing loop immediately. `continue` jumps to
+the next iteration (or back to the condition check for `while`). Both
+are only valid inside `for` / `while`.
+
+```
+for e in visible_enemies() {
+  if e.health > 50 { continue }
+  fire_at e.position
+  break
+}
+```
+
+### List Indexing (v1.1)
+
+Lists returned by sensors (`visible_enemies()`, `scan_enemies()`, etc.)
+can be read with zero-based indexing. Negative indices count from the
+end. Out-of-bounds access returns `null` — it never throws.
+
+```
+let first  = visible_enemies()[0]
+let last   = visible_enemies()[-1]
+let count  = length(visible_enemies())
 ```
 
 ### Return
@@ -433,7 +485,7 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `nearest_control_point()` | position | Nearest capture point |
 | `nearest_enemy_control_point()` | position | Nearest enemy-held control point |
 | `nearest_cover()` | position or `null` | Closest cover object |
-| `nearest_resource()` | entity or `null` | Closest resource node |
+| `nearest_resource()` | `null` | **Deprecated.** No arena populates resources; kept so old bots compile. Use `nearest_depot()` for ammo/heat resupply, or `nearest_pickup()` for timed buffs. |
 | `nearest_heal_zone()` | zone or `null` | Nearest healing zone with `position` and `radius` |
 | `nearest_hazard()` | zone or `null` | Nearest hazard zone |
 | `nearest_sound()` | sound or `null` | Most relevant recent sound cue |
@@ -492,6 +544,55 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `hive_get(key)` | value or `null` | Read a value from the shared team memory |
 | `hive_set(key, value)` | value | Write a value to the shared team memory (visible to all squad members) |
 | `hive_has(key)` | boolean | Whether the team has stored a value under `key` |
+
+### Predictive Perception (v1.1)
+
+These sensors let bots *anticipate* — leading shots, sidestepping
+incoming fire, and selecting between offense and defense from a single
+scalar threat estimate.
+
+| Call | Returns | Description |
+|------|---------|-------------|
+| `enemy_velocity(enemy)` | vector or `null` | Current velocity of the given enemy handle. `null` if the enemy is gone. |
+| `predict_position(enemy, ticks)` | position or `null` | Linear extrapolation of where `enemy` will be after `ticks` ticks. Clamped to arena bounds. |
+| `incoming_projectile()` | obj or `null` | The projectile closest to hitting you within vision range. Fields: `position`, `direction`, `distance`, `ticks_to_impact`, `damage`. Returns `null` if nothing is inbound. |
+| `damage_direction()` | vector or `null` | Unit vector from you *toward* your most recent attacker. Stays valid for ~30 ticks after the hit. |
+| `last_damage_tick()` | number | Tick you last took damage (or `-1`). Useful for "recently damaged" gating. |
+| `threat_level()` | number (0–100) | Composite threat scalar combining HP loss, visible enemy count, overheat, low ammo, recent damage. |
+| `length(list)` | number | Length of a list returned by a sensor. Also accessible as `list.length`. |
+| `list_empty(list)` | boolean | Convenience check for empty lists. |
+
+Example — lead-shot kiter:
+
+```
+let e = nearest_enemy()
+if e != null {
+  let predicted = predict_position(e, 6)
+  if predicted != null and can_attack(e) {
+    fire_at predicted
+  }
+}
+```
+
+Example — dodge incoming fire:
+
+```
+let incoming = incoming_projectile()
+if incoming != null and incoming.ticks_to_impact <= 4 {
+  strafe_right
+  return
+}
+```
+
+### Extended Math (v1.1)
+
+Trigonometry for trajectory work:
+
+| Call | Description |
+|------|-------------|
+| `sin(rad)` / `cos(rad)` | Standard trig. Inputs are in radians. |
+| `atan2(y, x)` | Four-quadrant arctangent, in radians. |
+| `deg_to_rad(deg)` / `rad_to_deg(rad)` | Conversions — `angle_to()` already returns degrees. |
 
 ### Math Built-ins
 

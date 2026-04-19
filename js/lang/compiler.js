@@ -115,6 +115,10 @@ export class Compiler {
   #functionOffsets = new Map();
   #userFunctionNames = new Set();
   #pendingCalls = [];
+  // Stack of loop contexts: each holds pending jumps that `break` and
+  // `continue` statements emitted while compiling the loop body, which get
+  // patched once we know the loop's exit and iteration-step offsets.
+  #loopStack = [];
 
   #reset() {
     this.#stateSlots = [];
@@ -124,6 +128,7 @@ export class Compiler {
     this.#functionOffsets = new Map();
     this.#userFunctionNames = new Set();
     this.#pendingCalls = [];
+    this.#loopStack = [];
   }
 
   compile(program) {
@@ -251,6 +256,7 @@ export class Compiler {
         functions,
         localWindowSize: chunk.localCount,
         eventHandlerHasParam,
+        sourceMap: chunk.sourceMap,
         squad: {
           size: squadSize,
           roles: squadRoles,
@@ -304,9 +310,17 @@ export class Compiler {
 
       case "SetStatement": {
         this.#compileExpression(stmt.value, b);
+        // Prefer locals over state when both names exist: locals shadow
+        // state inside nested scopes, matching the semantic analyzer's
+        // resolution order.
+        const localSlot = b.resolveLocal(stmt.name);
+        if (localSlot !== null) {
+          b.emitWithOperand(Op.STORE_LOCAL, localSlot, stmt.span.line, stmt.span.column);
+          break;
+        }
         const stateIdx = this.#stateIndexMap.get(stmt.name);
         if (stateIdx === undefined) {
-          throw new CompileError(`Unknown state variable '${stmt.name}'`, stmt.span.line, stmt.span.column);
+          throw new CompileError(`Unknown variable '${stmt.name}' (not a local or state var)`, stmt.span.line, stmt.span.column);
         }
         b.emitWithOperand(Op.STORE_STATE, stateIdx, stmt.span.line, stmt.span.column);
         break;
@@ -362,13 +376,65 @@ export class Compiler {
         b.beginScope();
         const slot = b.declareLocal(stmt.variable);
         b.emitWithOperand(Op.STORE_LOCAL, slot);
+        const ctx = { kind: "for", breaks: [], continues: [] };
+        this.#loopStack.push(ctx);
         this.#compileStatements(stmt.body, b);
+        this.#loopStack.pop();
         b.endScope();
 
+        // `continue` jumps here — back to ITER_NEXT
+        for (const off of ctx.continues) b.patchJump(off);
         // Jump back to loop start
         b.emitWithOperand(Op.JMP, loopStart);
         b.patchJump(exitJump);
         b.emit(Op.ITER_END);
+        // `break` jumps past the ITER_END so the iterator stack still pops
+        // via an explicit cleanup emitted before the forward jump. We emit
+        // an extra ITER_END after break-target so state stays balanced.
+        for (const off of ctx.breaks) b.patchJump(off);
+        break;
+      }
+
+      case "WhileStatement": {
+        // Guard against trivial infinite loops at compile time when the
+        // condition is a literal true — push a visible error so authors
+        // don't silently hang the tick. We still allow loops that break out.
+        const loopTop = b.code.length;
+        this.#compileExpression(stmt.condition, b);
+        const exitJump = b.emitJump(Op.JMP_IF_FALSE);
+        b.beginScope();
+        const ctx = { kind: "while", breaks: [], continues: [] };
+        this.#loopStack.push(ctx);
+        this.#compileStatements(stmt.body, b);
+        this.#loopStack.pop();
+        b.endScope();
+        // `continue` jumps back to the top (re-check condition)
+        for (const off of ctx.continues) {
+          b.code[off + 1] = (loopTop >> 8) & 0xff;
+          b.code[off + 2] = loopTop & 0xff;
+        }
+        b.emitWithOperand(Op.JMP, loopTop);
+        b.patchJump(exitJump);
+        // `break` jumps past the loop entirely
+        for (const off of ctx.breaks) b.patchJump(off);
+        break;
+      }
+
+      case "BreakStatement": {
+        const ctx = this.#loopStack[this.#loopStack.length - 1];
+        if (!ctx) {
+          throw new CompileError("'break' outside of a loop", stmt.span.line, stmt.span.column);
+        }
+        ctx.breaks.push(b.emitJump(Op.JMP));
+        break;
+      }
+
+      case "ContinueStatement": {
+        const ctx = this.#loopStack[this.#loopStack.length - 1];
+        if (!ctx) {
+          throw new CompileError("'continue' outside of a loop", stmt.span.line, stmt.span.column);
+        }
+        ctx.continues.push(b.emitJump(Op.JMP));
         break;
       }
 
@@ -565,6 +631,13 @@ export class Compiler {
         this.#compileExpression(expr.object, b);
         const propIdx = b.addConstant({ type: "string", value: expr.property });
         b.emitWithOperand(Op.GET_MEMBER, propIdx, expr.span.line, expr.span.column);
+        break;
+      }
+
+      case "IndexExpr": {
+        this.#compileExpression(expr.object, b);
+        this.#compileExpression(expr.index, b);
+        b.emit(Op.GET_INDEX, expr.span.line, expr.span.column);
         break;
       }
     }

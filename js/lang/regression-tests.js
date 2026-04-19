@@ -306,13 +306,29 @@ on tick {}`;
 }
 
 function testSetOnNonStateVariable() {
-  const source = `robot "BadSet" version "1.0"
+  // As of the language expansion for while-loops, `set` can mutate any
+  // local in scope (not just state vars). Assigning to an undeclared
+  // identifier is still an error, and assigning to a constant is still
+  // a hard error.
+  const ok = compile(`robot "GoodSet" version "1.0"
 on tick {
   let x = 5
   set x = 10
-}`;
-  const result = compile(source);
-  assert.ok(!result.success, "Should fail: set on non-state variable");
+}`);
+  assert.ok(ok.success, "set on a local should now compile");
+
+  const missing = compile(`robot "BadSet" version "1.0"
+on tick {
+  set undeclared = 10
+}`);
+  assert.ok(!missing.success, "set on undeclared identifier must still fail");
+
+  const constFail = compile(`robot "ConstSet" version "1.0"
+const { C = 1 }
+on tick {
+  set C = 2
+}`);
+  assert.ok(!constFail.success, "set on a constant must fail");
 }
 
 function testUnterminatedString() {
@@ -1284,6 +1300,166 @@ on tick {
   assert.ok(hasSuggestion, `Expected 'Did you mean ENGAGE_RANGE' suggestion, got: ${result.errors.join("; ")}`);
 }
 
+// --- Language v1.1 additions: while, break/continue, [], string concat ---
+
+function testWhileLoopCompilesAndRuns() {
+  const source = `robot "WhileTest" version "1.0"
+meta { class: "ranger" }
+state { total: number = 0 }
+on tick {
+  let i = 0
+  while i < 4 {
+    set total = total + i
+    set i = i + 1
+  }
+}`;
+  const r = compile(source);
+  assert.ok(r.success, `compile failed: ${r.errors.join(", ")}`);
+  const vm = new VM(r.program, "robot_1", () => null);
+  vm.setConstants(r.constants);
+  vm.executeEvent("tick", null, 1);
+  assert.equal(vm.getState()[0], 6, "0+1+2+3 should be 6");
+}
+
+function testWhileBreakStopsLoop() {
+  const source = `robot "BreakTest" version "1.0"
+meta { class: "ranger" }
+state { hit: number = 0 }
+on tick {
+  let i = 0
+  while i < 100 {
+    if i == 5 { break }
+    set i = i + 1
+  }
+  set hit = i
+}`;
+  const r = compile(source);
+  assert.ok(r.success, `compile failed: ${r.errors.join(", ")}`);
+  const vm = new VM(r.program, "robot_1", () => null);
+  vm.setConstants(r.constants);
+  vm.executeEvent("tick", null, 1);
+  assert.equal(vm.getState()[0], 5, "break should stop at i=5");
+}
+
+function testContinueSkipsRestOfBody() {
+  const source = `robot "ContTest" version "1.0"
+meta { class: "ranger" }
+state { even_sum: number = 0 }
+on tick {
+  let i = 0
+  while i < 6 {
+    set i = i + 1
+    if i % 2 == 1 { continue }
+    set even_sum = even_sum + i
+  }
+}`;
+  const r = compile(source);
+  assert.ok(r.success, `compile failed: ${r.errors.join(", ")}`);
+  const vm = new VM(r.program, "robot_1", () => null);
+  vm.setConstants(r.constants);
+  vm.executeEvent("tick", null, 1);
+  assert.equal(vm.getState()[0], 2 + 4 + 6, "even sum should be 12");
+}
+
+function testBreakOutsideLoopErrors() {
+  const r = compile(`robot "BadBreak" version "1.0"
+on tick { break }`);
+  assert.ok(!r.success, "break outside loop must error");
+}
+
+function testListIndexing() {
+  const source = `robot "IdxTest" version "1.0"
+meta { class: "ranger" }
+state { v: string = "" }
+on tick {
+  let enemies = visible_enemies()
+  let first = enemies[0]
+  let n = length(enemies)
+  set v = "count=" + n
+}`;
+  const r = compile(source);
+  assert.ok(r.success, `compile failed: ${r.errors.join(", ")}`);
+  const vm = new VM(r.program, "robot_1", (_, name) => {
+    if (name === "visible_enemies") return [];
+    if (name === "length") return 0;
+    return null;
+  });
+  vm.setConstants(r.constants);
+  vm.executeEvent("tick", null, 1);
+  assert.equal(vm.getState()[0], "count=0");
+}
+
+function testStringConcatRuntime() {
+  const source = `robot "ConcatTest" version "1.0"
+meta { class: "ranger" }
+state { s: string = "" }
+on tick {
+  let h = 42
+  set s = "hp=" + h
+}`;
+  const r = compile(source);
+  assert.ok(r.success, `compile failed: ${r.errors.join(", ")}`);
+  const vm = new VM(r.program, "robot_1", () => null);
+  vm.setConstants(r.constants);
+  vm.executeEvent("tick", null, 1);
+  assert.equal(vm.getState()[0], "hp=42");
+}
+
+function testNewPredictiveSensorsCompile() {
+  const source = `robot "Oracle" version "1.0"
+meta { class: "ranger" }
+state { t: number = 0 }
+on tick {
+  let e = nearest_enemy()
+  if e != null {
+    let predicted = predict_position(e, 5)
+    if predicted != null {
+      move_to predicted
+    }
+    let v = enemy_velocity(e)
+    if v != null {
+      set t = t + 1
+    }
+  }
+  if t > 0 {
+    set t = threat_level()
+  }
+  let incoming = incoming_projectile()
+  if incoming != null {
+    strafe_right
+  }
+  let d = damage_direction()
+  if d != null {
+    move_toward d
+  }
+}`;
+  const r = compile(source);
+  assert.ok(r.success, `compile failed: ${r.errors.join(", ")}`);
+  const warnings = r.diagnostics.filter(d => d.severity === "warning");
+  assert.equal(warnings.length, 0, `warnings: ${warnings.map(w => w.message).join("; ")}`);
+}
+
+function testRuntimeErrorHasLineNumber() {
+  // Force a runtime divergence by calling a sensor that throws.
+  const source = `robot "ErrTest" version "1.0"
+meta { class: "ranger" }
+on tick {
+  let x = health()
+  let y = x + 1
+  move_forward
+}`;
+  const r = compile(source);
+  assert.ok(r.success);
+  const vm = new VM(r.program, "robot_1", () => { throw new Error("synthetic"); });
+  vm.setConstants(r.constants);
+  const out = vm.executeEvent("tick", null, 1);
+  assert.ok(out.error, "expected an error from the throwing sensor");
+  assert.ok(
+    /line \d+/.test(out.error),
+    `expected line info in error, got: ${out.error}`,
+  );
+}
+
 // --- New default preset bots all compile cleanly ---
 
 function testNewPresetsCompileWithoutWarnings() {
@@ -1378,6 +1554,14 @@ function run() {
     testUnusedStateWarning,
     testUnusedConstantWarning,
     testIdentifierDidYouMean,
+    testWhileLoopCompilesAndRuns,
+    testWhileBreakStopsLoop,
+    testContinueSkipsRestOfBody,
+    testBreakOutsideLoopErrors,
+    testListIndexing,
+    testStringConcatRuntime,
+    testNewPredictiveSensorsCompile,
+    testRuntimeErrorHasLineNumber,
     testNewPresetsCompileWithoutWarnings,
   ];
 

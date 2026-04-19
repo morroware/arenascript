@@ -1,8 +1,8 @@
 // ============================================================================
 // Game Balance Constants & Configuration
 // ============================================================================
-export const ENGINE_VERSION = "0.1.0";
-export const LANGUAGE_VERSION = "1.0";
+export const ENGINE_VERSION = "0.2.0";
+export const LANGUAGE_VERSION = "1.1";
 // --- Arena ---
 export const ARENA_WIDTH = 140;
 export const ARENA_HEIGHT = 140;

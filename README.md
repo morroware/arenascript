@@ -2,25 +2,50 @@
 
 A deterministic robot arena combat engine with a custom domain-specific language (DSL) for programming autonomous robot behaviors. Write code in the ArenaScript language, compile it to bytecode, and watch your bots fight in a live arena visualization.
 
+> **Engine v0.2 · Language v1.1** — Adds `while` loops, list indexing (`list[i]`),
+> runtime string concatenation, predictive perception sensors
+> (`predict_position`, `incoming_projectile`, `damage_direction`,
+> `threat_level`), better runtime error messages with source-line info,
+> an in-app command palette (Ctrl+K), language reference drawer (Ctrl+/),
+> keyboard shortcut help (Shift+?), match-simulation loading overlay,
+> local match history, and two new reference bots (Oracle, Zealot)
+> showcasing the new features.
+
 ## Features
 
-- **Custom DSL** - ArenaScript language with lexer, parser, semantic analyzer, and bytecode compiler
-- **Sandboxed VM** - Stack-based bytecode interpreter with budget metering (prevents infinite loops)
-- **Deterministic Engine** - Multi-phase tick-based simulation with seeded PRNG for reproducible matches
-- **Resource Economy** - Heat + ammo + energy + HP create real strategic tradeoffs every tick
-- **Resupply Depots** - Contested neutral objectives that refill ammo and vent heat
-- **Information Warfare** - Cloaking with break-on-damage/attack + directional scan sensors
-- **Hive Memory** - Shared team key/value store for real squad coordination
-- **Advanced Combat** - Light/heavy projectile variants, short-range zap, armed self-destruct
-- **Centralized Validation** - Mode/config/participant request validation (NaN/Infinity rejected)
-- **Dynamic Arenas** - Seeded randomized cover layouts, healing zones, hazards, and depots
-- **Live Visualization** - Canvas-based arena rendering with replay animation
-- **4 Robot Classes** - Brawler, Ranger, Tank, and Support with distinct stats, heat, and ammo profiles
-- **Squad System** - 1-5 bots per team with role assignment
-- **Ranked System** - Elo-based matchmaking and rating tiers (Bronze through Champion)
-- **Tournaments** - Single elimination, round robin, and Swiss format support
-- **Replay System** - Full match replay capture including heat/ammo/cloak state
-- **PHP Backend** - API endpoints for matchmaking, lobbies, rankings, and tournaments
+### Language (v1.1)
+- **Custom DSL** — lexer, parser, semantic analyzer, bytecode compiler
+- **Sandboxed VM** — stack-based bytecode interpreter with budget metering (no runaway loops)
+- **`while` loops** with `break` / `continue`
+- **List indexing** (`list[i]`, supports negative indices, out-of-bounds returns `null`)
+- **String concatenation** via `+` when either side is a string
+- **Runtime errors carry source line/column info**, surfaced in diagnostics
+
+### Engine (v0.2)
+- **Deterministic** multi-phase tick loop with seeded PRNG for reproducible matches
+- **Resource economy** — heat + ammo + energy + HP create strategic tradeoffs every tick
+- **Predictive perception** — `enemy_velocity`, `predict_position`, `incoming_projectile`,
+  `damage_direction`, `threat_level` let bots lead shots and dodge
+- **Resupply depots** — contested neutrals that refill ammo and vent heat
+- **Information warfare** — cloaking with break-on-damage/attack + directional scan
+- **Hive memory** — shared team key/value store for squad coordination
+- **Advanced combat** — light/heavy projectiles, short-range zap, armed self-destruct
+- **5 hand-crafted arenas** — Crucible, Inferno, Fortress, Gauntlet, Plains
+- **4 robot classes** — Brawler, Ranger, Tank, Support with distinct stats & heat profiles
+
+### UI
+- **Command palette** (Ctrl+K) — jump between bots, views, docs, and actions
+- **Keyboard shortcut help** (Shift+?) — full binding reference in-app
+- **Language reference drawer** (Ctrl+/) — searchable, sectioned quick-lookup
+- **Match loading overlay** — visible progress during simulation
+- **Match history panel** — recent runs persisted to localStorage
+- **Live arena rendering** — bots, projectiles, hazards, depots, control points, cover, pickups
+- **Replay system** — scrubber, bookmarks (1st damage / 1st kill), variable speed
+
+### Competitive infrastructure
+- **Ranked** — Elo-based matchmaking, Bronze → Champion tiers
+- **Tournaments** — single-elim, round-robin, Swiss formats
+- **PHP backend** — matchmaking, lobbies, rankings, tournaments
 
 ## Tech Stack
 
@@ -57,8 +82,15 @@ No build tools, no bundlers, no package managers needed.
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+Enter` | Compile |
-| `Ctrl+Shift+Enter` | Run Match |
+| `Ctrl+Shift+Enter` | Compile & run match |
+| `Ctrl+S` | Save current editor program to library |
+| `Ctrl+K` | Command palette |
+| `Ctrl+/` | Open language reference |
+| `Shift+?` | Show keyboard shortcut help |
 | `Tab` | Insert 2 spaces in editor |
+| `Space` | Play / pause replay (in Arena view) |
+| `←` / `→` | Step replay frame (in Arena view) |
+| `Esc` | Close modal / exit full-screen match |
 
 ## Project Structure
 

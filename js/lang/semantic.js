@@ -45,6 +45,8 @@ const BUILTIN_SENSORS = new Set([
   // Math built-ins
   "abs", "min", "max", "clamp", "floor", "ceil", "round", "sign",
   "sqrt", "pow", "lerp", "pi",
+  // Extended math (trig + angles) — useful for trajectory prediction
+  "sin", "cos", "atan2", "deg_to_rad", "rad_to_deg",
   // Vector / spatial helpers
   "distance_between", "direction_to", "angle_between", "make_position",
   // Team / tactics helpers
@@ -52,6 +54,13 @@ const BUILTIN_SENSORS = new Set([
   "count_enemies_near", "count_allies_near",
   // Timing helper
   "tick_phase",
+  // List helpers
+  "length", "list_empty",
+  // Predictive perception (NEW)
+  "enemy_velocity", "predict_position", "incoming_projectile",
+  "damage_direction", "last_damage_tick", "threat_level",
+  // Debug / introspection
+  "log",
 ]);
 
 const VALID_ACTIONS = new Set([
@@ -115,6 +124,21 @@ export class SemanticAnalyzer {
   // surface "declared but never used" warnings at the end of analysis.
   #stateMeta = new Map(); // name -> { used:boolean, line, column }
   #constMeta = new Map();
+  #loopDepth = 0;
+
+  #containsBreak(stmts) {
+    for (const s of stmts) {
+      if (!s) continue;
+      if (s.kind === "BreakStatement") return true;
+      if (s.kind === "IfStatement") {
+        if (this.#containsBreak(s.thenBranch)) return true;
+        for (const b of s.elseIfBranches) if (this.#containsBreak(b.body)) return true;
+        if (s.elseBranch && this.#containsBreak(s.elseBranch)) return true;
+      }
+      if (s.kind === "ReturnStatement") return true;
+    }
+    return false;
+  }
 
   analyze(program) {
     this.#diagnostics = [];
@@ -124,6 +148,7 @@ export class SemanticAnalyzer {
     this.#localScopes = [];
     this.#stateMeta = new Map();
     this.#constMeta = new Map();
+    this.#loopDepth = 0;
 
     // Validate robot declaration
     if (!program.robot.name || program.robot.name.trim() === "") {
@@ -283,16 +308,30 @@ export class SemanticAnalyzer {
         this.#addLocal(stmt.name, stmt.span);
         break;
 
-      case "SetStatement":
-        if (!this.#stateVars.has(stmt.name)) {
+      case "SetStatement": {
+        // `set` can mutate either a state variable (persistent) or a local
+        // variable declared with `let` in the enclosing scope. Locals are
+        // required for mutable counters inside `while` loops, which would
+        // otherwise be nearly useless.
+        let isLocal = false;
+        for (let i = this.#localScopes.length - 1; i >= 0; i--) {
+          if (this.#localScopes[i].has(stmt.name)) { isLocal = true; break; }
+        }
+        if (!this.#stateVars.has(stmt.name) && !isLocal) {
           if (this.#constants.has(stmt.name)) {
             this.#addError(`Cannot mutate constant '${stmt.name}'. Constants are immutable`, stmt.span.line, stmt.span.column);
+          } else if (BUILTIN_SENSORS.has(stmt.name)) {
+            this.#addError(`Cannot assign to built-in sensor '${stmt.name}'`, stmt.span.line, stmt.span.column);
           } else {
-            this.#addError(`'set' can only mutate state variables. '${stmt.name}' is not declared in state {}`, stmt.span.line, stmt.span.column);
+            this.#addError(
+              `'set' can only mutate state variables or locals. '${stmt.name}' is not declared.`,
+              stmt.span.line, stmt.span.column,
+            );
           }
         }
         this.#validateExpression(stmt.value);
         break;
+      }
 
       case "IfStatement":
         this.#validateExpression(stmt.condition);
@@ -316,8 +355,41 @@ export class SemanticAnalyzer {
         this.#validateExpression(stmt.iterable);
         this.#pushScope();
         this.#addLocal(stmt.variable, stmt.span);
+        this.#loopDepth++;
         this.#validateStatements(stmt.body);
+        this.#loopDepth--;
         this.#popScope();
+        break;
+
+      case "WhileStatement":
+        this.#validateExpression(stmt.condition);
+        // Detect obvious `while true` with no break inside, which would hang
+        // the tick budget. We still allow it (break can exit) but warn.
+        if (stmt.condition.kind === "BooleanLiteral" && stmt.condition.value === true) {
+          if (!this.#containsBreak(stmt.body)) {
+            this.#addWarning(
+              "`while true` with no `break` will burn the tick budget every tick.",
+              stmt.span.line, stmt.span.column,
+            );
+          }
+        }
+        this.#pushScope();
+        this.#loopDepth++;
+        this.#validateStatements(stmt.body);
+        this.#loopDepth--;
+        this.#popScope();
+        break;
+
+      case "BreakStatement":
+        if (this.#loopDepth === 0) {
+          this.#addError("'break' is only allowed inside a loop.", stmt.span.line, stmt.span.column);
+        }
+        break;
+
+      case "ContinueStatement":
+        if (this.#loopDepth === 0) {
+          this.#addError("'continue' is only allowed inside a loop.", stmt.span.line, stmt.span.column);
+        }
         break;
 
       case "ReturnStatement":
@@ -415,6 +487,11 @@ export class SemanticAnalyzer {
 
       case "MemberExpr":
         this.#validateExpression(expr.object);
+        break;
+
+      case "IndexExpr":
+        this.#validateExpression(expr.object);
+        this.#validateExpression(expr.index);
         break;
 
       case "NumberLiteral":

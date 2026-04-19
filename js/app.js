@@ -18,6 +18,17 @@ import {
 } from "./engine/arena-presets.js";
 import * as BotLibrary from "./bot-library.js";
 import * as ApiClient from "./api-client.js";
+import {
+  installShortcutHelp,
+  installLangReference,
+  installCommandPalette,
+  showMatchLoading,
+  updateMatchLoading,
+  hideMatchLoading,
+  recordMatchHistory,
+  getMatchHistory,
+  clearMatchHistory,
+} from "./ui/enhanced.js";
 
 const telemetry = Telemetry.instance();
 let currentUser = null;
@@ -1129,6 +1140,243 @@ on low_health {
   send_signal "anchor_down"
 }`,
   },
+
+  oracle: {
+    name: "Oracle",
+    class: "ranger",
+    source: `robot "Oracle" version "1.1"
+
+// Showcase bot for the v1.1 predictive sensors: leads shots with
+// predict_position(), dodges with incoming_projectile(), and uses
+// threat_level() as a single-scalar mode switch. A good reference for
+// anyone writing a kiter against fast-moving targets.
+
+meta {
+  author: "ArenaLab"
+  class: "ranger"
+}
+
+const {
+  LEAD_TICKS = 6
+  DODGE_WINDOW = 8
+  SAFE_THREAT = 55
+  CLOSE_RANGE = 4
+}
+
+state {
+  last_strafe: number = 1
+  dodge_until: number = 0
+}
+
+on spawn {
+  mark_position "spawn_home"
+}
+
+// Turn perpendicular to an incoming projectile for a few ticks.
+fn start_dodge(dir_x: number, dir_y: number) {
+  set dodge_until = current_tick() + DODGE_WINDOW
+  // Perpendicular strafe direction: flip signs each hit so we zig-zag.
+  set last_strafe = last_strafe * -1
+}
+
+on tick {
+  if is_in_hazard() { move_forward return }
+
+  // Dodge incoming fire for a short window before re-engaging.
+  let incoming = incoming_projectile()
+  if incoming != null and incoming.ticks_to_impact <= 4 {
+    start_dodge(incoming.direction.x, incoming.direction.y)
+    if last_strafe > 0 { strafe_right } else { strafe_left }
+    return
+  }
+  if current_tick() < dodge_until {
+    if last_strafe > 0 { strafe_right } else { strafe_left }
+    return
+  }
+
+  // Resource economy: fall back to the nearest depot when we are low on
+  // ammo OR overheated. Oracle never brawls — range is her entire kit.
+  if ammo_percent() < 25 or heat_percent() > 85 {
+    let depot = nearest_depot()
+    if depot != null {
+      move_to depot.position
+      return
+    }
+    vent_heat
+    return
+  }
+
+  let enemy = nearest_enemy()
+  if enemy == null {
+    let cp = nearest_enemy_control_point()
+    if cp != null { move_to cp.position return }
+    overwatch
+    stop
+    return
+  }
+
+  let threat = threat_level()
+
+  // Panic retreat on compound threat (low HP + multiple enemies visible).
+  if threat > SAFE_THREAT {
+    let heal = nearest_heal_zone()
+    if heal != null { move_to heal.position return }
+    retreat
+    return
+  }
+
+  let d = distance_to(enemy.position)
+
+  // Close-quarters fallback: zap is cheap and bypasses ammo.
+  if d < CLOSE_RANGE {
+    if energy() > 25 { zap return }
+    retreat
+    return
+  }
+
+  // Lead-shot: predict where the target will be after LEAD_TICKS and fire there.
+  let predicted = predict_position(enemy, LEAD_TICKS)
+  if predicted != null and can_attack(enemy) {
+    fire_at predicted
+    // Sidestep after firing to avoid return-fire telegraphed by the enemy.
+    if last_strafe > 0 { strafe_right } else { strafe_left }
+    set last_strafe = last_strafe * -1
+    return
+  }
+  move_toward enemy.position
+}
+
+on damaged(event) {
+  // Use damage_direction to dodge AWAY from the attacker perpendicular.
+  let d = damage_direction()
+  if d != null {
+    set last_strafe = last_strafe * -1
+  }
+}
+
+on low_health {
+  hive_set("oracle_retreating", 1)
+}`,
+  },
+
+  zealot: {
+    name: "Zealot",
+    class: "brawler",
+    source: `robot "Zealot" version "1.1"
+
+// Aggressive brawler that uses v1.1 reactive sensors: damage_direction()
+// to chase the last attacker, threat_level() to commit or disengage, and
+// while-loop + array indexing to pick the weakest of multiple visible
+// targets. Pair this with Oracle as an "anchor + pressure" squad.
+
+meta {
+  author: "ArenaLab"
+  class: "brawler"
+}
+
+const {
+  COMMIT_THREAT = 70
+  MIN_TARGET_HP = 1
+}
+
+state {
+  target_id: string = ""
+  chase_until: number = 0
+}
+
+// Walk the visible-enemy list with a while loop + [] indexing to pick the
+// lowest-HP target, skipping cloaked targets at range (they're already
+// filtered by the sensor gateway but we keep the guard for clarity).
+fn pick_weakest() -> id {
+  let visible = visible_enemies()
+  let n = length(visible)
+  if n == 0 { return "" }
+  let i = 0
+  let best_id = visible[0].id
+  let best_hp = visible[0].health
+  while i < n {
+    let e = visible[i]
+    if e.health < best_hp and e.health >= MIN_TARGET_HP {
+      set best_hp = e.health
+      set best_id = e.id
+    }
+    set i = i + 1
+  }
+  return best_id
+}
+
+on spawn {
+  set target_id = ""
+}
+
+on tick {
+  if is_in_hazard() { turn_right move_forward return }
+
+  // If we were recently damaged, chase the attacker for a few ticks.
+  if current_tick() < chase_until {
+    let dir = damage_direction()
+    if dir != null {
+      let me = position()
+      let goto = make_position(me.x + dir.x * 10, me.y + dir.y * 10)
+      move_to goto
+      return
+    }
+  }
+
+  // Too much heat — swap to a free melee swing instead of forcing a fire.
+  if heat_percent() > 80 {
+    let close = nearest_enemy()
+    if close != null and distance_to(close.position) < 3 {
+      attack close
+      return
+    }
+    vent_heat
+    return
+  }
+
+  let threat = threat_level()
+
+  // If we're committed and still healthy, tunnel-vision onto the weakest.
+  if threat < COMMIT_THREAT {
+    set target_id = pick_weakest()
+  }
+
+  let enemy = nearest_enemy()
+  if enemy == null {
+    // If we have a remembered target, post-up on the last signal we have.
+    if target_id != "" {
+      hive_set("zealot_target", target_id)
+    }
+    let cp = nearest_enemy_control_point()
+    if cp != null { move_to cp.position return }
+    move_forward
+    return
+  }
+
+  let d = distance_to(enemy.position)
+  if d < 4 {
+    if can_attack(enemy) { attack enemy return }
+    move_toward enemy.position
+    return
+  }
+
+  // Gap close with burst if ammo allows, otherwise run it down.
+  if d < 10 and ammo() >= 6 and heat_percent() < 60 {
+    burst_fire enemy.position
+    return
+  }
+  move_toward enemy.position
+}
+
+on damaged(event) {
+  set chase_until = current_tick() + 20
+}
+
+on low_health {
+  let heal = nearest_heal_zone()
+  if heal != null { move_to heal.position }
+}`,
+  },
 };
 
 const TEAM_PRESETS = {
@@ -1643,7 +1891,7 @@ function doCompile() {
 // Match Execution
 // ============================================================================
 
-function doRunMatch() {
+async function doRunMatch() {
   if (!compiledPlayer) {
     logToConsole("Compile your bot first.", "warn");
     return;
@@ -1736,6 +1984,12 @@ function doRunMatch() {
     participants,
   };
 
+  // Show the loading overlay, yield to the browser so it paints, then run
+  // the (synchronous) match. This makes the simulation feel responsive
+  // for longer matches and gives us a place to report progress.
+  showMatchLoading("Simulating match…", `You vs ${oppPreset.name}`);
+  await nextFrame();
+
   let result;
   try {
     telemetry.increment(Telemetry.MATCH_RUN);
@@ -1744,7 +1998,10 @@ function doRunMatch() {
     telemetry.increment(Telemetry.MATCH_ERROR);
     logToConsole(`Match error: ${e.message}`, "error");
     arenaStatus.textContent = "Error";
+    hideMatchLoading();
     return;
+  } finally {
+    hideMatchLoading();
   }
 
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
@@ -1761,11 +2018,33 @@ function doRunMatch() {
     logToConsole(`  ${id}: dmg=${stats.damageDealt}  taken=${stats.damageTaken}  kills=${stats.kills}`, "stat");
   }
 
+  // Record to the local match history so users can scroll back through
+  // their recent runs. Stored in localStorage; wiped via a header button.
+  try {
+    recordMatchHistory({
+      you: compiledPlayer.program?.robotName ?? "Your Bot",
+      opponent: oppPreset.name,
+      arena: arenaLabel,
+      mode,
+      seed: setup.config.seed,
+      ticks: result.tickCount,
+      winnerTeam: result.winner,
+      youWon: result.winner === 0,
+      reason: result.reason,
+    });
+  } catch (e) { /* non-fatal */ }
+
   showMatchResults(result, oppPreset.name);
   startReplay(result, oppPreset.name);
+  refreshMatchHistoryPanel();
 }
 
-function doRunTeamSimulation() {
+/** Yield one animation frame so the browser can paint pending UI. */
+function nextFrame() {
+  return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+}
+
+async function doRunTeamSimulation() {
   const teamPreset = TEAM_PRESETS[teamPresetSelect?.value ?? ""];
   if (!teamPreset) {
     logToConsole("Invalid team preset selection.", "error");
@@ -1818,6 +2097,9 @@ function doRunTeamSimulation() {
     participants,
   };
 
+  showMatchLoading("Simulating team match…", `${teamPreset.name}`);
+  await nextFrame();
+
   let result;
   try {
     telemetry.increment(Telemetry.MATCH_RUN);
@@ -1826,8 +2108,10 @@ function doRunTeamSimulation() {
     telemetry.increment(Telemetry.MATCH_ERROR);
     logToConsole(`Match error: ${e.message}`, "error");
     arenaStatus.textContent = "Error";
+    hideMatchLoading();
     return;
   }
+  hideMatchLoading();
   telemetry.record(Telemetry.MATCH_DURATION_TICKS, result.tickCount);
   lastMatchResult = result;
   const opponentName = teamPreset.name;
@@ -3034,8 +3318,32 @@ document.addEventListener("keydown", (e) => {
   } else if (e.ctrlKey && e.key === "Enter") {
     e.preventDefault();
     doCompile();
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    // Ctrl/Cmd+S: save current editor program to library (browser default
+    // would save the page — we suppress that and do something useful).
+    e.preventDefault();
+    document.getElementById("btn-save-library")?.click();
+  } else if (!isFieldInFocus(e.target)) {
+    // Replay controls (only when the user isn't typing). The replay
+    // controls are also hidden outside of Arena view so the arrow keys
+    // still feel "free" elsewhere.
+    if (e.key === " " && currentView === "arena") {
+      e.preventDefault();
+      toggleReplayPlayPause();
+    } else if (e.key === "ArrowRight" && currentView === "arena") {
+      e.preventDefault();
+      stepReplayForward();
+    } else if (e.key === "ArrowLeft" && currentView === "arena") {
+      e.preventDefault();
+      stepReplayBack();
+    }
   }
 });
+
+function isFieldInFocus(el) {
+  if (!el) return false;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+}
 
 // ============================================================================
 // Team Builder (Modal)
@@ -4006,11 +4314,163 @@ BotLibrary.subscribe(() => {
 });
 
 // ============================================================================
+// Match history panel (local, stored in localStorage via ui/enhanced.js)
+// ============================================================================
+
+function refreshMatchHistoryPanel() {
+  const listEl = document.getElementById("match-history-list");
+  if (!listEl) return;
+  const history = getMatchHistory();
+  listEl.innerHTML = "";
+  if (history.length === 0) {
+    listEl.innerHTML = `<div class="match-history-empty">No matches yet — run one in the Arena and it'll appear here.</div>`;
+    return;
+  }
+  for (const entry of history) {
+    const row = document.createElement("div");
+    row.className = "match-history-entry";
+    const resultClass =
+      entry.winnerTeam === null ? "draw" : entry.youWon ? "win" : "loss";
+    const resultLabel =
+      entry.winnerTeam === null ? "DRAW" : entry.youWon ? "WIN" : "LOSS";
+    const ago = formatRelative(entry.ts);
+    row.innerHTML = `
+      <span class="match-history-result ${resultClass}">${resultLabel}</span>
+      <span class="match-history-detail">${escapeHtml(entry.you)} <span style="color:var(--text-muted)">vs</span> ${escapeHtml(entry.opponent)}</span>
+      <span class="match-history-meta">${escapeHtml(entry.arena ?? "")} · seed ${escapeHtml(String(entry.seed))}</span>
+      <span class="match-history-meta">${ago}</span>`;
+    listEl.appendChild(row);
+  }
+}
+
+function formatRelative(ts) {
+  const sec = Math.round((Date.now() - ts) / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.round(hr / 24);
+  return `${d}d ago`;
+}
+
+document.getElementById("btn-match-history-clear")?.addEventListener("click", () => {
+  if (!confirm("Clear local match history?")) return;
+  clearMatchHistory();
+  refreshMatchHistoryPanel();
+});
+
+// ============================================================================
+// Install enhanced UI (command palette + shortcut help + language reference)
+// ============================================================================
+
+installShortcutHelp();
+installLangReference();
+
+installCommandPalette(() => {
+  // Build the command list dynamically so newly saved user bots, current
+  // view state, etc. are reflected each time the palette opens.
+  const cmds = [];
+  cmds.push({
+    kind: "action", icon: "▶",
+    label: "Compile current program",
+    hint: "Ctrl+Enter",
+    keywords: ["build"],
+    run: () => doCompile(),
+  });
+  cmds.push({
+    kind: "action", icon: "⚔",
+    label: "Compile and run match",
+    hint: "Ctrl+Shift+Enter",
+    keywords: ["battle", "fight"],
+    run: () => doCompileAndRun(),
+  });
+  cmds.push({
+    kind: "action", icon: "💾",
+    label: "Save current editor program to library",
+    keywords: ["save"],
+    run: () => document.getElementById("btn-save-library")?.click(),
+  });
+  cmds.push({
+    kind: "action", icon: "🗑",
+    label: "Clear console",
+    keywords: ["log", "output"],
+    run: () => clearConsole(),
+  });
+  for (const view of ["builder", "arena", "library"]) {
+    cmds.push({
+      kind: "action", icon: "→",
+      label: `Switch to ${view.charAt(0).toUpperCase() + view.slice(1)} view`,
+      keywords: ["view", "tab", "go"],
+      run: () => setView(view),
+    });
+  }
+  cmds.push({
+    kind: "doc", icon: "📖",
+    label: "Open language reference",
+    hint: "Ctrl+/",
+    keywords: ["docs", "help", "sensor", "syntax"],
+    run: () => document.getElementById("btn-open-lang-ref")?.click(),
+  });
+  cmds.push({
+    kind: "doc", icon: "?",
+    label: "Show keyboard shortcuts",
+    hint: "Shift+?",
+    keywords: ["help", "keys"],
+    run: () => document.getElementById("btn-show-help")?.click(),
+  });
+
+  // Preset bots — load into editor
+  for (const [key, preset] of Object.entries(BOT_PRESETS)) {
+    cmds.push({
+      kind: "bot", icon: classIconLetter(preset.class) ?? "B",
+      label: `Load preset: ${preset.name}`,
+      hint: preset.class,
+      keywords: ["preset", preset.class, preset.name.toLowerCase()],
+      run: () => {
+        loadPreset(key);
+        setView("builder");
+      },
+    });
+  }
+  // User bots
+  for (const bot of BotLibrary.getAll()) {
+    cmds.push({
+      kind: "bot", icon: classIconLetter(bot.class) ?? "•",
+      label: `Load my bot: ${bot.name}`,
+      hint: bot.class,
+      keywords: ["mine", "my", bot.class, bot.name.toLowerCase()],
+      run: () => {
+        loadPreset(bot.id);
+        setView("builder");
+      },
+    });
+  }
+  // Match actions
+  cmds.push({
+    kind: "match", icon: "⚑",
+    label: "Open team builder",
+    run: () => document.getElementById("btn-open-team-builder")?.click(),
+  });
+  cmds.push({
+    kind: "match", icon: "↺",
+    label: "Run match with random seed",
+    run: () => {
+      if (seedInput) seedInput.value = "";
+      setView("arena");
+      doRunMatch();
+    },
+  });
+  return cmds;
+});
+
+// ============================================================================
 // Init
 // ============================================================================
 
 refreshOpponentSelect();
 renderSidebarUserBots();
+refreshMatchHistoryPanel();
 updateAuthModeUi();
 refreshCurrentUser().catch(() => {});
 loadPreset("bruiser");
@@ -4019,4 +4479,4 @@ drawIdle();
 updateEditorFileName();
 updateArenaLoadedBotLabel();
 logToConsole(`ArenaScript v${ENGINE_VERSION} — Ready`, "event");
-logToConsole("Select a preset, upload a bot in My Bots, or write your own — then Compile & Run.", "info");
+logToConsole("Tip: Ctrl+K opens the command palette, Ctrl+/ opens the language reference.", "info");

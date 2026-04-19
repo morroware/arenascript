@@ -260,6 +260,12 @@ export class Parser {
         return this.#parseIfStatement();
       case TokenType.For:
         return this.#parseForStatement();
+      case TokenType.While:
+        return this.#parseWhileStatement();
+      case TokenType.Break:
+        return this.#parseBreakStatement();
+      case TokenType.Continue:
+        return this.#parseContinueStatement();
       case TokenType.Return:
         return this.#parseReturnStatement();
       case TokenType.After:
@@ -327,6 +333,26 @@ export class Parser {
     return { kind: "ForStatement", variable, iterable, body, span };
   }
 
+  #parseWhileStatement() {
+    const span = this.#currentSpan();
+    this.#expect(TokenType.While);
+    const condition = this.#parseExpression();
+    const body = this.#parseBlock();
+    return { kind: "WhileStatement", condition, body, span };
+  }
+
+  #parseBreakStatement() {
+    const span = this.#currentSpan();
+    this.#expect(TokenType.Break);
+    return { kind: "BreakStatement", span };
+  }
+
+  #parseContinueStatement() {
+    const span = this.#currentSpan();
+    this.#expect(TokenType.Continue);
+    return { kind: "ContinueStatement", span };
+  }
+
   #parseReturnStatement() {
     const span = this.#currentSpan();
     this.#expect(TokenType.Return);
@@ -343,6 +369,9 @@ export class Parser {
         next.type !== TokenType.Set &&
         next.type !== TokenType.If &&
         next.type !== TokenType.For &&
+        next.type !== TokenType.While &&
+        next.type !== TokenType.Break &&
+        next.type !== TokenType.Continue &&
         next.type !== TokenType.After &&
         next.type !== TokenType.Every &&
         next.type !== TokenType.Return &&
@@ -368,6 +397,9 @@ export class Parser {
       !this.#check(TokenType.Set) &&
       !this.#check(TokenType.If) &&
       !this.#check(TokenType.For) &&
+      !this.#check(TokenType.While) &&
+      !this.#check(TokenType.Break) &&
+      !this.#check(TokenType.Continue) &&
       !this.#check(TokenType.Return) &&
       !this.#check(TokenType.On) &&
       !this.#check(TokenType.Fn) &&
@@ -514,6 +546,12 @@ export class Parser {
         this.#advance();
         const property = this.#expect(TokenType.Identifier).value;
         expr = { kind: "MemberExpr", object: expr, property, span };
+      } else if (this.#check(TokenType.LeftBracket)) {
+        const span = this.#currentSpan();
+        this.#advance();
+        const index = this.#parseExpression();
+        this.#expect(TokenType.RightBracket);
+        expr = { kind: "IndexExpr", object: expr, index, span };
       } else {
         break;
       }

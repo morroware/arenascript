@@ -24,6 +24,14 @@ function robotToSensorView(robot) {
     position: { x: robot.position.x, y: robot.position.y },
     health: robot.health,
     heading: { x: robot.heading.x, y: robot.heading.y },
+    // Velocity exposure is deliberately coarse — floored to 2 decimals so
+    // tiny per-tick jitter doesn't leak determinism fingerprints, but
+    // fast enough for bots to lead shots and dodge.
+    velocity: {
+      x: Math.round((robot.velocity?.x ?? 0) * 100) / 100,
+      y: Math.round((robot.velocity?.y ?? 0) * 100) / 100,
+    },
+    class: robot.class,
   };
 }
 
@@ -260,21 +268,13 @@ export function createSensorGateway(world) {
         return nearest;
       }
 
-      case "nearest_resource": {
-        let nearestDist = Infinity;
-        let nearest = null;
-        // Only search within vision range (consistent with other discovery-based sensors)
-        const visionRange = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
-        for (const res of world.resources.values()) {
-          const d = distance(robot.position, res.position);
-          if (d > visionRange) continue;
-          if (d < nearestDist) {
-            nearestDist = d;
-            nearest = { id: res.id, position: { x: res.position.x, y: res.position.y }, amount: res.amount };
-          }
-        }
-        return nearest;
-      }
+      // `nearest_resource` used to return entries from world.resources, but
+      // no arena preset or random generator ever populates that map, so the
+      // sensor was dead weight. Use `nearest_depot` for ammo/heat resupply
+      // or `nearest_pickup` for timed buffs instead. The sensor stays
+      // registered so old bots compile, but it always returns null.
+      case "nearest_resource":
+        return null;
 
       case "nearest_control_point": {
         let nearestDist = Infinity;
@@ -777,6 +777,138 @@ export function createSensorGateway(world) {
         const period = Math.max(1, Math.floor(toNum(args[0] ?? 30)));
         return world.currentTick % period;
       }
+
+      // --- List helpers (match list[i] indexing) ---
+      case "length": {
+        const v = args[0];
+        if (Array.isArray(v)) return v.length;
+        if (typeof v === "string") return v.length;
+        return 0;
+      }
+      case "list_empty": {
+        const v = args[0];
+        if (Array.isArray(v)) return v.length === 0;
+        return true;
+      }
+
+      // --- Extended math (trig + angle conversion) ---
+      case "sin": return Math.sin(toNum(args[0]));
+      case "cos": return Math.cos(toNum(args[0]));
+      case "atan2": return Math.atan2(toNum(args[0]), toNum(args[1]));
+      case "deg_to_rad": return toNum(args[0]) * (Math.PI / 180);
+      case "rad_to_deg": return toNum(args[0]) * (180 / Math.PI);
+
+      // --- Predictive perception (NEW) ---
+      // enemy_velocity(enemy) -> vector | null
+      //   Velocity is already attached to robotToSensorView, so this is a
+      //   convenience helper for authors who pass around entity handles.
+      case "enemy_velocity": {
+        const e = args[0];
+        if (!e || typeof e !== "object") return null;
+        // Accept either a live robot view or a bare id
+        const targetId = typeof e === "string" ? e : e.id;
+        if (!targetId) return null;
+        const target = world.robots.get(targetId);
+        if (!target || !target.alive) return null;
+        return {
+          x: Math.round((target.velocity?.x ?? 0) * 100) / 100,
+          y: Math.round((target.velocity?.y ?? 0) * 100) / 100,
+        };
+      }
+
+      // predict_position(enemy, ticks) -> position | null
+      //   Linear extrapolation — naive but good enough for lead-shot bots.
+      case "predict_position": {
+        const e = args[0];
+        const ticks = Math.max(0, Math.floor(toNum(args[1] ?? 5)));
+        if (!e || typeof e !== "object") return null;
+        const targetId = typeof e === "string" ? e : e.id;
+        const target = world.robots.get(targetId);
+        if (!target || !target.alive) return null;
+        const px = target.position.x + (target.velocity?.x ?? 0) * ticks;
+        const py = target.position.y + (target.velocity?.y ?? 0) * ticks;
+        return {
+          x: Math.max(0, Math.min(world.config.arenaWidth, px)),
+          y: Math.max(0, Math.min(world.config.arenaHeight, py)),
+        };
+      }
+
+      // incoming_projectile() -> { position, direction, distance, ticks_to_impact } | null
+      //   Finds the projectile closest to hitting this robot within vision range.
+      //   Returns null if no threat is near — lets bots write simple dodge logic.
+      case "incoming_projectile": {
+        const visionRange = CLASS_STATS[robot.class]?.visionRange ?? DEFAULT_VISION_RANGE;
+        let best = null;
+        let bestTicks = Infinity;
+        for (const proj of world.projectiles.values()) {
+          const owner = world.getRobot(proj.ownerId);
+          if (!owner) continue;
+          if (owner.teamId === robot.teamId) continue; // ignore friendly fire
+          const dx = robot.position.x - proj.position.x;
+          const dy = robot.position.y - proj.position.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > visionRange) continue;
+          // Relative velocity projection — positive means closing on us.
+          const vlen = Math.hypot(proj.velocity.x, proj.velocity.y);
+          if (vlen < 1e-6) continue;
+          const closingSpeed = (proj.velocity.x * dx + proj.velocity.y * dy) / dist;
+          if (closingSpeed <= 0.1) continue; // moving away or parallel
+          const ticksToImpact = dist / vlen;
+          if (ticksToImpact < bestTicks) {
+            bestTicks = ticksToImpact;
+            best = {
+              position: { x: proj.position.x, y: proj.position.y },
+              direction: { x: proj.velocity.x / vlen, y: proj.velocity.y / vlen },
+              distance: Math.round(dist * 10) / 10,
+              ticks_to_impact: Math.round(ticksToImpact),
+              damage: proj.damage,
+            };
+          }
+        }
+        return best;
+      }
+
+      // damage_direction() -> vector | null
+      //   Unit vector pointing FROM us TOWARD the attacker of our most
+      //   recent damage event. Stays valid for DAMAGE_MEMORY_TICKS after
+      //   the hit so bots can run "strafe perpendicular" logic for a few
+      //   frames without needing to re-check every tick.
+      case "damage_direction": {
+        const mem = robot.memory.lastDamage;
+        if (!mem) return null;
+        if (world.currentTick - mem.tick > 30) return null;
+        return { x: mem.dirX, y: mem.dirY };
+      }
+
+      // last_damage_tick() -> number
+      case "last_damage_tick": {
+        return robot.memory.lastDamage ? robot.memory.lastDamage.tick : -1;
+      }
+
+      // threat_level() -> number (0-100)
+      //   Quick-and-dirty "how bad is my situation" heuristic so bots can
+      //   gate their aggressive/defensive branch on a single scalar.
+      //   Factors: low health, many visible enemies, overheated, low ammo.
+      case "threat_level": {
+        let threat = 0;
+        if (robot.maxHealth > 0) {
+          const hpLoss = 1 - (robot.health / robot.maxHealth);
+          threat += hpLoss * 40;
+        }
+        const enemies = getVisibleEnemies(world, robot).length;
+        threat += Math.min(enemies * 15, 30);
+        if (robot.overheated) threat += 15;
+        if (robot.maxAmmo > 0 && robot.ammo / robot.maxAmmo < 0.15) threat += 10;
+        if (robot.memory.lastDamage && world.currentTick - robot.memory.lastDamage.tick < 10) threat += 5;
+        return Math.max(0, Math.min(100, Math.round(threat)));
+      }
+
+      // log(msg, [value]) -> null
+      //   No-op for the runtime itself (diagnostic channel only). The VM's
+      //   decision-trace captures this through the action stream; for now
+      //   we just swallow it so bots can document state transitions.
+      case "log":
+        return null;
 
       default:
         // Semantic analysis rejects unknown sensors at compile time, so

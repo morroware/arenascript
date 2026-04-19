@@ -27,13 +27,17 @@
       </nav>
     </div>
     <div class="top-bar-actions">
-      <span class="shortcut-hint">Ctrl+Enter Compile</span>
-      <span class="shortcut-hint">Ctrl+Shift+Enter Run</span>
+      <button id="btn-open-palette" class="btn btn-ghost" title="Command palette (Ctrl+K)">
+        <span class="kbd-inline">Ctrl</span><span class="kbd-inline">K</span> Commands
+      </button>
+      <button id="btn-open-lang-ref" class="btn btn-ghost" title="Language reference (Ctrl+/)">
+        Docs
+      </button>
       <span id="auth-status" class="shortcut-hint">Guest</span>
       <button id="btn-auth-open" class="btn btn-compile">Sign In</button>
       <button id="btn-auth-logout" class="btn btn-save" hidden>Sign Out</button>
       <button id="btn-sync-cloud" class="btn btn-run" hidden>Sync Cloud Bots</button>
-      <span class="version-badge">Engine v0.1.0</span>
+      <span class="version-badge" id="version-badge">v0.2.0 · Lang 1.1</span>
     </div>
   </header>
 
@@ -126,6 +130,24 @@
           <div class="bot-preset-info">
             <span class="bot-preset-name">Overclock</span>
             <span class="bot-preset-class">Tank · Adaptive</span>
+          </div>
+        </button>
+
+        <div class="sidebar-subheader">v1.1 · Predictive</div>
+
+        <button class="bot-preset" data-bot="oracle" title="Oracle — Predictive ranger (leads shots, dodges incoming)">
+          <div class="bot-class-icon ranger">O</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Oracle</span>
+            <span class="bot-preset-class">Ranger · Predictive</span>
+          </div>
+        </button>
+
+        <button class="bot-preset" data-bot="zealot" title="Zealot — Reactive brawler (chases attackers, picks weakest target)">
+          <div class="bot-class-icon brawler">Z</div>
+          <div class="bot-preset-info">
+            <span class="bot-preset-name">Zealot</span>
+            <span class="bot-preset-class">Brawler · Reactive</span>
           </div>
         </button>
 
@@ -349,6 +371,16 @@
 
         <!-- Bot grid -->
         <div id="library-grid" class="library-grid"></div>
+
+        <!-- Local match history -->
+        <div class="match-history" id="match-history-panel">
+          <div class="match-history-header">
+            <h4>Recent matches</h4>
+            <button id="btn-match-history-clear" type="button" title="Clear local history">Clear</button>
+          </div>
+          <div id="match-history-list" class="match-history-list"></div>
+        </div>
+
         <div id="library-empty" class="library-empty">
           <div class="library-empty-icon">&#129302;</div>
           <h3>No bots in your library yet</h3>
@@ -398,6 +430,18 @@
     <span>&#10094;</span> Back to Editor
   </button>
 
+  <!-- Match simulation loading overlay -->
+  <div id="match-loading" class="match-loading" hidden role="status" aria-live="polite">
+    <div class="match-loading-inner">
+      <div class="match-loading-spinner"></div>
+      <div class="match-loading-text" id="match-loading-text">Simulating match…</div>
+      <div class="match-loading-sub" id="match-loading-sub">Preparing combatants</div>
+    </div>
+  </div>
+
+  <!-- Shortcut hint: tap "?" for help, Ctrl+K for palette -->
+  <button id="btn-show-help" class="floating-help-btn" title="Keyboard shortcuts (Shift+?)" aria-label="Show help">?</button>
+
   <!-- Match Live: Scoreboard overlay -->
   <div id="match-scoreboard" class="match-scoreboard">
     <span class="scoreboard-team scoreboard-team-0" id="scoreboard-team0">Team 0</span>
@@ -408,6 +452,64 @@
 
   <!-- Toast / notification slot -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Command Palette (Ctrl/Cmd+K) -->
+  <div id="cmd-palette" class="cmd-palette" hidden role="dialog" aria-label="Command palette">
+    <div class="cmd-palette-backdrop"></div>
+    <div class="cmd-palette-box">
+      <input id="cmd-palette-input" class="cmd-palette-input" type="text" placeholder="Type a command, bot name, or sensor..." autocomplete="off" spellcheck="false" />
+      <div id="cmd-palette-list" class="cmd-palette-list" role="listbox" aria-label="Commands"></div>
+      <div class="cmd-palette-footer">
+        <span><kbd>&uarr;&darr;</kbd> Navigate</span>
+        <span><kbd>&crarr;</kbd> Select</span>
+        <span><kbd>Esc</kbd> Close</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcut Help Modal (Shift+?) -->
+  <div id="shortcut-help" class="tb-modal-overlay" hidden role="dialog" aria-label="Keyboard shortcuts">
+    <div class="tb-modal shortcut-help-modal">
+      <div class="tb-modal-header">
+        <h2>Keyboard Shortcuts</h2>
+        <button id="btn-close-shortcut-help" class="tb-modal-close" title="Close">&times;</button>
+      </div>
+      <div class="tb-modal-body shortcut-help-body">
+        <section>
+          <h3>Editor</h3>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>Enter</kbd><span>Compile current program</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Enter</kbd><span>Compile &amp; run match</span></div>
+          <div class="shortcut-row"><kbd>Tab</kbd><span>Insert 2 spaces</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>S</kbd><span>Save to library</span></div>
+        </section>
+        <section>
+          <h3>Navigation</h3>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>K</kbd><span>Open command palette</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd><kbd>/</kbd><span>Open language reference</span></div>
+          <div class="shortcut-row"><kbd>Shift</kbd><kbd>?</kbd><span>Show this help</span></div>
+          <div class="shortcut-row"><kbd>Esc</kbd><span>Close modal / exit full-screen match</span></div>
+        </section>
+        <section>
+          <h3>Replay</h3>
+          <div class="shortcut-row"><kbd>Space</kbd><span>Play / pause replay</span></div>
+          <div class="shortcut-row"><kbd>&larr;</kbd><kbd>&rarr;</kbd><span>Step frame back / forward</span></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Language Reference Drawer (Ctrl+/) -->
+  <aside id="lang-ref-drawer" class="lang-ref-drawer" hidden aria-label="Language reference">
+    <div class="lang-ref-header">
+      <h2>ArenaScript <span class="lang-ref-sub">Reference</span></h2>
+      <button id="btn-close-lang-ref" class="lang-ref-close" title="Close">&times;</button>
+    </div>
+    <div class="lang-ref-search">
+      <input id="lang-ref-search" type="text" placeholder="Filter..." autocomplete="off" spellcheck="false" />
+    </div>
+    <nav class="lang-ref-nav" id="lang-ref-nav"></nav>
+    <div class="lang-ref-content" id="lang-ref-content"></div>
+  </aside>
 
   <!-- Auth Modal -->
   <div id="auth-modal" class="tb-modal-overlay" hidden>
