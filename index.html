@@ -243,6 +243,24 @@
 
         <div class="sidebar-divider"></div>
 
+        <div class="sidebar-section">
+          <label for="gauntlet-slate">Gauntlet (your bot vs a slate)</label>
+          <select id="gauntlet-slate" class="opponent-select">
+            <option value="tutorial" selected>Beginner slate (Rookie, Bruiser, Kiter)</option>
+            <option value="mixed">Mixed slate (one per class)</option>
+            <option value="advanced">Advanced slate (Phantom, Overclock, Oracle, Zealot)</option>
+            <option value="all">All presets</option>
+          </select>
+          <div class="sidebar-inline-row" style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+            <label for="gauntlet-seeds" style="font-size:11px;color:var(--text-muted);">Seeds per foe</label>
+            <input id="gauntlet-seeds" type="number" min="1" max="10" value="3" class="opponent-select" style="max-width:64px;">
+          </div>
+          <button id="btn-run-gauntlet" class="btn btn-run btn-block" style="margin-top:8px;">Run Gauntlet</button>
+          <div class="sidebar-help">Runs your compiled bot vs each opponent across N seeds and reports winrate.</div>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
         <div class="sidebar-section sidebar-loaded-bot">
           <label>Your Bot</label>
           <div id="arena-loaded-bot" class="arena-loaded-bot">None loaded</div>

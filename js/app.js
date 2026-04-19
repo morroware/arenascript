@@ -2576,6 +2576,169 @@ function nextFrame() {
   return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 }
 
+// ============================================================================
+// Bot gauntlet: pit the current compiled bot against a slate of opponents
+// ============================================================================
+//
+// Pure wrapper around runMatch(): no language/engine changes. Ensures the UI
+// stays responsive by yielding a frame between simulations and short-circuits
+// when the user already has a match running. Records a single summary entry
+// in the match history (kind: "gauntlet") rather than flooding it with every
+// leg of the run.
+
+const GAUNTLET_SLATES = {
+  tutorial: ["rookie", "bruiser", "kiter"],
+  mixed: ["bruiser", "kiter", "fortress", "healer"],
+  advanced: ["phantom", "overclock", "oracle", "zealot"],
+  all: null, // sentinel — expanded at run time to every BOT_PRESETS key
+};
+
+let gauntletRunning = false;
+
+async function doRunGauntlet() {
+  if (gauntletRunning) {
+    toast("Gauntlet already running.", "warn");
+    return;
+  }
+  if (!compiledPlayer) {
+    logToConsole("Compile your bot before running the gauntlet.", "warn");
+    toast("Compile first (Ctrl+Enter).", "warn");
+    return;
+  }
+
+  const slateSel = document.getElementById("gauntlet-slate");
+  const seedsInput = document.getElementById("gauntlet-seeds");
+  const slateKey = slateSel?.value ?? "tutorial";
+  const baseSlate = GAUNTLET_SLATES[slateKey] ?? GAUNTLET_SLATES.tutorial;
+  const slate = (baseSlate === null ? Object.keys(BOT_PRESETS) : baseSlate)
+    .filter(k => BOT_PRESETS[k]);
+  // Exclude self so the user can't trivially draw against themselves when
+  // they've loaded a preset into the editor — the matchup is usually
+  // uninteresting and it frees time for a real opponent.
+  const editorName = compiledPlayer.program?.robotName ?? null;
+  const uniqueSlate = slate.filter(k => BOT_PRESETS[k].name !== editorName);
+  const seeds = Math.max(1, Math.min(10, Number.parseInt(seedsInput?.value ?? "3", 10) || 3));
+  const totalMatches = uniqueSlate.length * seeds;
+  if (totalMatches === 0) {
+    toast("Empty slate — pick a different gauntlet option.", "warn");
+    return;
+  }
+
+  // Pre-compile all opponents once so we don't pay the compile cost per match.
+  const opponents = [];
+  for (const key of uniqueSlate) {
+    try {
+      const c = compile(BOT_PRESETS[key].source);
+      if (!c.success) {
+        logToConsole(`Gauntlet: skipping ${key} (compile failed: ${c.errors.join(", ")})`, "warn");
+        continue;
+      }
+      opponents.push({ key, name: BOT_PRESETS[key].name, program: c.program, constants: c.constants });
+    } catch (e) {
+      logToConsole(`Gauntlet: skipping ${key} (${e.message})`, "warn");
+    }
+  }
+  if (opponents.length === 0) {
+    toast("No opponents compiled cleanly.", "error");
+    return;
+  }
+
+  gauntletRunning = true;
+  const btnGauntlet = document.getElementById("btn-run-gauntlet");
+  if (btnGauntlet) btnGauntlet.disabled = true;
+  showMatchLoading("Running gauntlet…", `0 / ${opponents.length * seeds}`);
+  logToConsole(`\n--- Gauntlet: ${opponents.length} opponents × ${seeds} seeds = ${opponents.length * seeds} matches ---`, "event");
+
+  const perOpponent = new Map(); // key -> { wins, losses, draws, errors, name }
+  for (const o of opponents) perOpponent.set(o.key, { name: o.name, wins: 0, losses: 0, draws: 0, errors: 0 });
+  let totals = { wins: 0, losses: 0, draws: 0, errors: 0 };
+  let matchIdx = 0;
+  const startedAt = Date.now();
+
+  // Using a fixed seed family (hash of opponent + seed index) so each slate
+  // run is reproducible given the same starting time slice.
+  const baseSeed = (Date.now() & 0x7fffffff) >>> 0;
+  let lastResult = null;
+
+  try {
+    for (const opp of opponents) {
+      for (let s = 0; s < seeds; s++) {
+        const seed = (baseSeed + matchIdx * 31 + s * 7) >>> 0;
+        const setup = {
+          config: {
+            mode: "duel_1v1",
+            arenaWidth: ARENA_WIDTH,
+            arenaHeight: ARENA_HEIGHT,
+            maxTicks: 3000,
+            tickRate: 30,
+            seed,
+            arenaId: getMatchArenaId(),
+          },
+          participants: [
+            { program: compiledPlayer.program, constants: compiledPlayer.constants, playerId: "player", teamId: 0 },
+            { program: opp.program, constants: opp.constants, playerId: opp.key, teamId: 1 },
+          ],
+        };
+        matchIdx++;
+        updateMatchLoading(`${matchIdx} / ${opponents.length * seeds} — vs ${opp.name}`);
+        // Yield so the loading overlay repaints. Running this many matches
+        // without yielding would freeze the browser.
+        await nextFrame();
+
+        let result;
+        try {
+          result = runMatch(setup);
+        } catch (e) {
+          perOpponent.get(opp.key).errors++;
+          totals.errors++;
+          logToConsole(`  [${matchIdx}] ${opp.name} seed=${seed}: ERROR ${e.message}`, "error");
+          continue;
+        }
+        lastResult = result;
+
+        const bucket = perOpponent.get(opp.key);
+        if (result.winner === null) { bucket.draws++; totals.draws++; }
+        else if (result.winner === 0) { bucket.wins++; totals.wins++; }
+        else { bucket.losses++; totals.losses++; }
+      }
+    }
+  } finally {
+    gauntletRunning = false;
+    if (btnGauntlet) btnGauntlet.disabled = false;
+    hideMatchLoading();
+  }
+
+  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+  const pct = (n, d) => d === 0 ? "0%" : `${Math.round((n / d) * 100)}%`;
+  const grandTotal = totals.wins + totals.losses + totals.draws;
+  logToConsole(`Gauntlet complete in ${elapsed}s — ${totals.wins}W / ${totals.losses}L / ${totals.draws}D (${pct(totals.wins, grandTotal || 1)} winrate)`, "success");
+  for (const [key, row] of perOpponent) {
+    const n = row.wins + row.losses + row.draws;
+    const err = row.errors > 0 ? ` · ${row.errors} errors` : "";
+    logToConsole(`  vs ${row.name.padEnd(12)} ${row.wins}W / ${row.losses}L / ${row.draws}D  (${pct(row.wins, n || 1)})${err}`, "stat");
+  }
+
+  // Persist a single aggregate entry so the history view shows gauntlets as
+  // their own distinct rows instead of 18+ noise entries.
+  try {
+    recordMatchHistory({
+      kind: "gauntlet",
+      you: compiledPlayer.program?.robotName ?? "Your Bot",
+      opponent: `Gauntlet: ${slateKey} (${opponents.length} foes × ${seeds})`,
+      arena: getMatchArenaId(),
+      mode: "gauntlet",
+      seed: baseSeed,
+      ticks: lastResult?.tickCount ?? 0,
+      winnerTeam: totals.wins > totals.losses ? 0 : (totals.losses > totals.wins ? 1 : null),
+      youWon: totals.wins > totals.losses,
+      reason: `${totals.wins}W/${totals.losses}L/${totals.draws}D`,
+    });
+  } catch (e) { /* non-fatal */ }
+  refreshMatchHistoryPanel();
+
+  toast(`Gauntlet: ${totals.wins}/${grandTotal} wins · see console for breakdown.`, totals.wins > totals.losses ? "success" : "info");
+}
+
 async function doRunTeamSimulation() {
   const teamPreset = TEAM_PRESETS[teamPresetSelect?.value ?? ""];
   if (!teamPreset) {
@@ -3818,7 +3981,70 @@ editorEl.addEventListener("input", () => {
 
 editorEl.addEventListener("scroll", syncScroll);
 
+/**
+ * Editor key handling: indentation, bracket auto-close, smart Enter.
+ *
+ * The autocomplete popup installs its own `keydown` listener and pre-empts
+ * Tab / Enter / Escape while it's visible. Because DOM listeners fire in
+ * registration order, this handler runs first — so we check the popup's
+ * visibility up front and defer to it when open. That also closes a latent
+ * double-insert bug that existed before Phase 3 (Tab with autocomplete open
+ * would insert 2 spaces AND an accepted completion).
+ */
+const AUTO_CLOSE_PAIRS = { "(": ")", "[": "]", "{": "}", '"': '"' };
+
+function isAutocompleteOpen() {
+  const el = document.querySelector(".editor-autocomplete");
+  return !!(el && !el.hidden);
+}
+
+/**
+ * Count `"` characters before the caret on the current line so we don't
+ * auto-close a string inside another string (the heuristic used by the
+ * autocomplete gating earlier).
+ */
+function cursorIsInsideStringLiteral() {
+  const src = editorEl.value;
+  const pos = editorEl.selectionStart;
+  const lineStart = src.lastIndexOf("\n", pos - 1) + 1;
+  const prefix = src.slice(lineStart, pos);
+  let count = 0;
+  for (let i = 0; i < prefix.length; i++) {
+    if (prefix[i] === "\\") { i++; continue; } // skip escaped char
+    if (prefix[i] === '"') count++;
+  }
+  return count % 2 === 1;
+}
+
+/**
+ * Compute indentation (leading whitespace only) of the line containing `pos`.
+ * Returns the exact whitespace substring so we can preserve tabs or mixed
+ * indent if anyone somehow gets them in — the editor itself uses 2-space
+ * indent but we don't want to corrupt pasted code.
+ */
+function indentOfLine(src, pos) {
+  const lineStart = src.lastIndexOf("\n", pos - 1) + 1;
+  let i = lineStart;
+  while (i < src.length && (src[i] === " " || src[i] === "\t")) i++;
+  return src.slice(lineStart, i);
+}
+
+function insertAtCursor(text, caretOffsetFromEnd = 0) {
+  const start = editorEl.selectionStart;
+  const end = editorEl.selectionEnd;
+  editorEl.value = editorEl.value.slice(0, start) + text + editorEl.value.slice(end);
+  const newCaret = start + text.length - caretOffsetFromEnd;
+  editorEl.selectionStart = editorEl.selectionEnd = newCaret;
+  onEditorInput();
+}
+
 editorEl.addEventListener("keydown", (e) => {
+  // Defer to the autocomplete popup when it's up.
+  if (isAutocompleteOpen() && (e.key === "Tab" || e.key === "Enter" || e.key === "Escape"
+      || e.key === "ArrowUp" || e.key === "ArrowDown")) {
+    return;
+  }
+
   if (e.key === "Tab") {
     e.preventDefault();
     const start = editorEl.selectionStart;
@@ -3827,6 +4053,93 @@ editorEl.addEventListener("keydown", (e) => {
       editorEl.value.substring(0, start) + "  " + editorEl.value.substring(end);
     editorEl.selectionStart = editorEl.selectionEnd = start + 2;
     onEditorInput();
+    return;
+  }
+
+  // Smart Enter: preserve the current line's indent, and add one extra level
+  // when the previous non-whitespace char on the line is `{`. Skip when the
+  // user has a selection (Enter should replace selections normally).
+  if (e.key === "Enter" && !e.shiftKey && editorEl.selectionStart === editorEl.selectionEnd) {
+    const pos = editorEl.selectionStart;
+    const src = editorEl.value;
+    const baseIndent = indentOfLine(src, pos);
+    // Find the last non-whitespace char before the caret on the same line.
+    const lineStart = src.lastIndexOf("\n", pos - 1) + 1;
+    let j = pos - 1;
+    while (j >= lineStart && (src[j] === " " || src[j] === "\t")) j--;
+    const prevChar = j >= lineStart ? src[j] : "";
+    const nextChar = src[pos] ?? "";
+
+    if (prevChar === "{" && nextChar === "}") {
+      // { | }  ->  insert newline+indent+extra, newline+indent, keep caret in middle
+      e.preventDefault();
+      const extra = "  ";
+      const inserted = `\n${baseIndent}${extra}\n${baseIndent}`;
+      insertAtCursor(inserted, baseIndent.length + 1);
+      return;
+    }
+    if (prevChar === "{") {
+      e.preventDefault();
+      const extra = "  ";
+      insertAtCursor(`\n${baseIndent}${extra}`);
+      return;
+    }
+    if (baseIndent.length > 0) {
+      e.preventDefault();
+      insertAtCursor(`\n${baseIndent}`);
+      return;
+    }
+  }
+
+  // Auto-close brackets and quotes. Only fire when there's no selection —
+  // wrapping a selection would be a separate, more opinionated feature and
+  // can surprise users who expect the character to overwrite their selection.
+  if (editorEl.selectionStart === editorEl.selectionEnd && AUTO_CLOSE_PAIRS[e.key]) {
+    const opener = e.key;
+    const closer = AUTO_CLOSE_PAIRS[opener];
+    const src = editorEl.value;
+    const pos = editorEl.selectionStart;
+    const nextChar = src[pos] ?? "";
+
+    // Don't auto-pair a quote if the caret is already inside a string —
+    // the user is almost certainly closing it by hand.
+    if (opener === '"' && cursorIsInsideStringLiteral()) return;
+
+    // Don't auto-pair if the next character is an identifier char. Typing
+    // `(` before an existing `foo` usually means "wrap this call" and our
+    // simple heuristic would leave a stray `)` mid-expression.
+    if (/[A-Za-z0-9_]/.test(nextChar) && opener !== '"') return;
+
+    e.preventDefault();
+    insertAtCursor(opener + closer, 1);
+    return;
+  }
+
+  // Skip-over-closer: typing `)` when the caret sits on an auto-inserted `)`
+  // should move past it rather than inserting a second one. This is the
+  // canonical editor-UX pattern.
+  if ((e.key === ")" || e.key === "]" || e.key === "}" || e.key === '"')
+      && editorEl.selectionStart === editorEl.selectionEnd
+      && editorEl.value[editorEl.selectionStart] === e.key) {
+    e.preventDefault();
+    editorEl.selectionStart = editorEl.selectionEnd = editorEl.selectionStart + 1;
+    return;
+  }
+
+  // Backspace inside an empty pair deletes both sides.
+  if (e.key === "Backspace"
+      && editorEl.selectionStart === editorEl.selectionEnd
+      && editorEl.selectionStart > 0) {
+    const pos = editorEl.selectionStart;
+    const left = editorEl.value[pos - 1];
+    const right = editorEl.value[pos];
+    if (AUTO_CLOSE_PAIRS[left] === right) {
+      e.preventDefault();
+      editorEl.value = editorEl.value.slice(0, pos - 1) + editorEl.value.slice(pos + 1);
+      editorEl.selectionStart = editorEl.selectionEnd = pos - 1;
+      onEditorInput();
+      return;
+    }
   }
 });
 
@@ -3839,6 +4152,7 @@ btnRun.addEventListener("click", doRunMatch);
 btnCompileRun.addEventListener("click", doCompileAndRun);
 btnClear.addEventListener("click", clearConsole);
 btnRunTeamSim?.addEventListener("click", doRunTeamSimulation);
+document.getElementById("btn-run-gauntlet")?.addEventListener("click", doRunGauntlet);
 
 presetButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -4185,6 +4499,110 @@ function toggleVisionOverlay() {
     drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
   }
 }
+
+// --- Canvas hover inspector -------------------------------------------------
+//
+// Hover the canvas during a replay to inspect the robot under the cursor.
+// We reuse the current replay frame rather than listening to engine state so
+// the tooltip stays correct while scrubbing or paused. Pure read-only — no
+// frame mutation — so this can't break rendering or determinism.
+
+const canvasTooltipEl = (() => {
+  if (typeof document === "undefined") return null;
+  const el = document.createElement("div");
+  el.className = "canvas-tooltip";
+  el.hidden = true;
+  document.body.appendChild(el);
+  return el;
+})();
+
+function currentReplayFrame() {
+  if (!replayData || replayData.length === 0) return null;
+  const idx = Math.min(replayFrameIndex, replayData.length - 1);
+  return replayData[idx] ?? null;
+}
+
+/** Pixel -> arena coord, accounting for CSS scaling of the canvas. */
+function canvasPxToArena(clientX, clientY) {
+  const rect = canvasEl.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  const pxX = (clientX - rect.left) * (canvasEl.width / rect.width);
+  const pxY = (clientY - rect.top)  * (canvasEl.height / rect.height);
+  const s = canvasScale();
+  if (s === 0) return null;
+  const { ox, oy } = canvasOffset();
+  return { x: (pxX - ox) / s, y: (pxY - oy) / s };
+}
+
+function findRobotAt(frame, arenaX, arenaY, maxArenaDist = 3) {
+  if (!frame || !frame.robots) return null;
+  let best = null;
+  let bestDist = maxArenaDist;
+  for (const r of frame.robots) {
+    if (r.health <= 0) continue;
+    const dx = r.position.x - arenaX;
+    const dy = r.position.y - arenaY;
+    const d = Math.hypot(dx, dy);
+    if (d < bestDist) { bestDist = d; best = r; }
+  }
+  return best;
+}
+
+function formatAction(action) {
+  if (!action) return "idle";
+  if (typeof action === "string") return action;
+  if (typeof action !== "object") return String(action);
+  const type = action.type ?? "?";
+  if (action.target && typeof action.target === "object" && "x" in action.target) {
+    return `${type} → (${Math.round(action.target.x)}, ${Math.round(action.target.y)})`;
+  }
+  if (action.target) return `${type} → ${action.target}`;
+  return type;
+}
+
+function hideCanvasTooltip() {
+  if (canvasTooltipEl) canvasTooltipEl.hidden = true;
+}
+
+canvasEl?.addEventListener("mousemove", (e) => {
+  if (!canvasTooltipEl) return;
+  const frame = currentReplayFrame();
+  if (!frame) { hideCanvasTooltip(); return; }
+  const arena = canvasPxToArena(e.clientX, e.clientY);
+  if (!arena) { hideCanvasTooltip(); return; }
+  const hit = findRobotAt(frame, arena.x, arena.y, 3.5);
+  if (!hit) { hideCanvasTooltip(); return; }
+
+  const label = replayLabels?.[hit.id] ?? hit.id;
+  const cs = CLASS_STATS[hit.robotClass];
+  const maxHP = cs?.health ?? 100;
+  const hpPct = Math.max(0, Math.min(100, Math.round((hit.health / maxHP) * 100)));
+  const team = hit.teamId === 0 ? "team 0" : "team 1";
+  const cloak = hit.cloaked ? " · cloaked" : "";
+  const heat = cs?.maxHeat !== undefined && hit.heat !== undefined ? ` · heat ${Math.round(hit.heat)}` : "";
+  const action = formatAction(hit.action);
+
+  canvasTooltipEl.innerHTML = `
+    <div class="ct-row ct-title">
+      <span class="ct-team team-${hit.teamId}">${team}</span>
+      <b>${escapeHtml(label)}</b>
+      <span class="ct-class">${escapeHtml(hit.robotClass ?? "")}</span>
+    </div>
+    <div class="ct-row">HP <b>${hit.health}</b> / ${maxHP} (${hpPct}%)</div>
+    <div class="ct-row">tick <b>${frame.tick ?? 0}</b> · ${escapeHtml(action)}${cloak}${heat}</div>
+  `;
+  // Anchor to the cursor but flip to the left if near the right edge.
+  const pad = 12;
+  const rect = canvasTooltipEl.getBoundingClientRect();
+  const desiredW = Math.max(rect.width, 220);
+  let x = e.clientX + pad;
+  if (x + desiredW > window.innerWidth - 8) x = e.clientX - desiredW - pad;
+  canvasTooltipEl.style.left = `${Math.max(8, x)}px`;
+  canvasTooltipEl.style.top = `${e.clientY + pad}px`;
+  canvasTooltipEl.hidden = false;
+});
+
+canvasEl?.addEventListener("mouseleave", hideCanvasTooltip);
 
 // Wire Team Builder modal
 btnOpenTeamBuilder?.addEventListener("click", tbOpenModal);
@@ -5013,6 +5431,13 @@ installCommandPalette(() => {
     hint: lastMatchBundle ? `seed ${lastMatchBundle.seed}` : "run a match first",
     keywords: ["share", "copy", "replay", "link", "export"],
     run: () => doShareMatch(),
+  });
+  cmds.push({
+    kind: "match", icon: "🏆",
+    label: "Run gauntlet against preset slate",
+    hint: "your bot vs N opponents",
+    keywords: ["gauntlet", "benchmark", "winrate", "test"],
+    run: () => doRunGauntlet(),
   });
   cmds.push({
     kind: "action", icon: "🗑",

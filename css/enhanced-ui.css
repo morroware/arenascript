@@ -509,6 +509,59 @@
 }
 
 /* ============================================================================
+ * Canvas hover tooltip (replay robot inspector)
+ * ========================================================================= */
+
+.canvas-tooltip {
+  position: fixed;
+  z-index: 1500;
+  min-width: 220px;
+  max-width: 320px;
+  pointer-events: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  line-height: 1.45;
+}
+
+.canvas-tooltip .ct-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.canvas-tooltip .ct-title {
+  margin-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 3px;
+}
+
+.canvas-tooltip .ct-team {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+.canvas-tooltip .ct-team.team-0 { background: rgba(84, 172, 240, 0.2); color: var(--accent-cyan); }
+.canvas-tooltip .ct-team.team-1 { background: rgba(255, 120, 120, 0.2); color: var(--accent-red); }
+
+.canvas-tooltip .ct-class {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: auto;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================================
  * Editor autocomplete popup
  * ========================================================================= */
 
