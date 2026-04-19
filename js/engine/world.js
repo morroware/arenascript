@@ -97,6 +97,11 @@ export class World {
         discoveredHazards: new Map(),
         spawnPosition: { x: pos.x, y: pos.y },
         waypoints: new Map(),  // named positions: string -> {x, y}
+        // Stores the unit vector pointing FROM us TOWARD the last source
+        // of damage, plus the tick it happened. Consumed by the
+        // `damage_direction` sensor so bots can strafe perpendicular to
+        // incoming fire for a short window after being hit.
+        lastDamage: null,  // { tick, dirX, dirY, sourceId }
       },
       alive: true,
       teamId,

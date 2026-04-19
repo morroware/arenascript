@@ -53,6 +53,8 @@ export const Op = Object.freeze({
 
   // Object access
   GET_MEMBER: 0x80,    // get property from object on stack
+  GET_INDEX: 0x81,     // get element from list at integer index
+  LIST_LEN: 0x82,      // push length of list on stack
 
   // Iteration
   ITER_START: 0x90,    // begin bounded iteration

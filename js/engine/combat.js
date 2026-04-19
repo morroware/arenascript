@@ -295,6 +295,25 @@ export function applyDamage(world, target, damage, sourceId) {
     target.cloakExpiresTick = 0;
   }
 
+  // Record direction to attacker so the `damage_direction` sensor can
+  // surface a stable vector for a few ticks after the hit. We point
+  // FROM the target TOWARD the attacker (so bots can either retreat
+  // along -v or strafe perpendicular).
+  const source = sourceId ? world.getRobot(sourceId) : null;
+  if (source && source.alive) {
+    const dx = source.position.x - target.position.x;
+    const dy = source.position.y - target.position.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 1e-6) {
+      target.memory.lastDamage = {
+        tick: world.currentTick,
+        dirX: dx / len,
+        dirY: dy / len,
+        sourceId,
+      };
+    }
+  }
+
   world.emitEvent({
     type: "damaged",
     tick: world.currentTick,

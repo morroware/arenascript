@@ -32,6 +32,22 @@ export class VM {
     const localsSize = Math.max(256, (program.localWindowSize || 1) * VM.MAX_CALL_DEPTH);
     this.locals = new Array(localsSize).fill(null);
     this.localBase = 0;
+    // Source map from the compiler: bytecode offset -> { line, column }
+    // Used to tag runtime errors with their origin line for better DX.
+    this.sourceMap = program.sourceMap ?? new Map();
+    this.lastSourceLocation = null;
+  }
+
+  /** Look up the nearest compiled source location at or before the given offset. */
+  nearestSourceLocation(offset) {
+    if (!this.sourceMap || this.sourceMap.size === 0) return null;
+    // Walk backwards until we find a mapped offset — compiler only records
+    // source info on instructions that originate from the AST.
+    for (let i = offset; i >= 0; i--) {
+      const loc = this.sourceMap.get(i);
+      if (loc) return loc;
+    }
+    return null;
   }
 
   /** Execute an event handler */
@@ -71,6 +87,13 @@ export class VM {
     try {
       while (this.ip < this.bytecode.length) {
         this.budget.tick();
+        // Track the most recent annotated source location so that any
+        // runtime error thrown by this opcode (stack underflow, bad call,
+        // etc.) can be reported with a line/column instead of just an
+        // opaque message.
+        const preIp = this.ip;
+        const loc = this.sourceMap.get(preIp);
+        if (loc) this.lastSourceLocation = loc;
         const op = this.bytecode[this.ip++];
 
         switch (op) {
@@ -147,8 +170,20 @@ export class VM {
             break;
           }
 
-          // Arithmetic
-          case Op.ADD: { const b = this.popNum(); const a = this.popNum(); this.push(a + b); break; }
+          // Arithmetic — ADD also doubles as string concatenation when
+          // either operand is a string. All other operators stay numeric.
+          case Op.ADD: {
+            const rawB = this.pop();
+            const rawA = this.pop();
+            if (typeof rawA === "string" || typeof rawB === "string") {
+              this.push(this.stringify(rawA) + this.stringify(rawB));
+            } else {
+              const bn = (typeof rawB === "number" && Number.isFinite(rawB)) ? rawB : 0;
+              const an = (typeof rawA === "number" && Number.isFinite(rawA)) ? rawA : 0;
+              this.push(an + bn);
+            }
+            break;
+          }
           case Op.SUB: { const b = this.popNum(); const a = this.popNum(); this.push(a - b); break; }
           case Op.MUL: { const b = this.popNum(); const a = this.popNum(); this.push(a * b); break; }
           case Op.DIV: { const b = this.popNum(); const a = this.popNum(); this.push(b !== 0 ? a / b : 0); break; }
@@ -265,9 +300,31 @@ export class VM {
               } else {
                 this.push(obj[prop] ?? null);
               }
+            } else if (Array.isArray(obj) && prop === "length") {
+              // Ergonomic: allow `myList.length` as a shortcut for length()
+              this.push(obj.length);
             } else {
               this.push(null);
             }
+            break;
+          }
+
+          case Op.GET_INDEX: {
+            const idx = this.pop();
+            const list = this.pop();
+            if (!Array.isArray(list)) { this.push(null); break; }
+            const i = Math.trunc(typeof idx === "number" && Number.isFinite(idx) ? idx : 0);
+            // Support negative indices (from end), return null on out-of-bounds
+            // so bots get predictable behaviour rather than undefined crashes.
+            const real = i < 0 ? list.length + i : i;
+            if (real < 0 || real >= list.length) { this.push(null); break; }
+            this.push(list[real] ?? null);
+            break;
+          }
+
+          case Op.LIST_LEN: {
+            const list = this.pop();
+            this.push(Array.isArray(list) ? list.length : 0);
             break;
           }
 
@@ -338,15 +395,28 @@ export class VM {
           case Op.HALT:
             return { actions: this.actions, budgetExceeded: false, instructionsUsed: _budgetStart - this.budget.instructions };
 
-          default:
-            return { actions: this.actions, budgetExceeded: false, instructionsUsed: _budgetStart - this.budget.instructions, error: `Unknown opcode: 0x${op.toString(16)}` };
+          default: {
+            const loc = this.lastSourceLocation ?? this.nearestSourceLocation(this.ip - 1);
+            const hint = loc ? ` (near line ${loc.line}, col ${loc.column})` : "";
+            return {
+              actions: this.actions,
+              budgetExceeded: false,
+              instructionsUsed: _budgetStart - this.budget.instructions,
+              error: `Unknown opcode: 0x${op.toString(16)}${hint}`,
+            };
+          }
         }
       }
     } catch (e) {
       if (e instanceof BudgetExceededError) {
         budgetExceeded = true;
       } else {
-        error = e instanceof Error ? e.message : String(e);
+        const base = e instanceof Error ? e.message : String(e);
+        // Walk the source map backwards from the current IP to find the
+        // closest annotated instruction — lets us report "stack underflow
+        // at 14:7" instead of bare "Stack underflow".
+        const loc = this.lastSourceLocation ?? this.nearestSourceLocation(this.ip - 1);
+        error = loc ? `${base} (at line ${loc.line}, col ${loc.column})` : base;
       }
     }
 
@@ -392,6 +462,24 @@ export class VM {
   isTruthy(v) {
     if (v === null || v === false || v === 0) return false;
     return true;
+  }
+
+  /** Convert any VM value to a readable string (used by ADD and log()). */
+  stringify(v) {
+    if (v === null || v === undefined) return "null";
+    if (typeof v === "string") return v;
+    if (typeof v === "number") {
+      if (!Number.isFinite(v)) return "0";
+      return Number.isInteger(v) ? v.toString() : v.toFixed(2);
+    }
+    if (typeof v === "boolean") return v ? "true" : "false";
+    if (Array.isArray(v)) return `[list x${v.length}]`;
+    if (v && typeof v === "object") {
+      if ("x" in v && "y" in v) return `(${this.stringify(v.x)}, ${this.stringify(v.y)})`;
+      if (v.id) return `<${v.id}>`;
+      return "<object>";
+    }
+    return String(v);
   }
 
   readU16() {
