@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { Lexer } from "./tokens.js";
 import { Parser } from "./parser.js";
 import { SemanticAnalyzer } from "./semantic.js";
@@ -1148,6 +1149,160 @@ on tick {
   }
 }
 
+// --- New built-ins: math, vector, tactics helpers ---
+
+function testMathBuiltinsCompile() {
+  const source = `robot "MathTest" version "1.0"
+on tick {
+  let a = abs(-5)
+  let b = min(3, 7)
+  let c = max(3, 7)
+  let d = clamp(15, 0, 10)
+  let e = floor(3.7)
+  let f = ceil(3.2)
+  let g = round(3.5)
+  let h = sign(-2)
+  let i = sqrt(9)
+  let j = pow(2, 3)
+  let k = lerp(0, 10, 0.5)
+  let l = pi()
+  let m = tick_phase(30)
+  if a > 0 and b > 0 and c > 0 and d > 0 and e > 0 and f > 0 and g > 0 and h < 0 and i > 0 and j > 0 and k > 0 and l > 0 and m >= 0 {
+    stop
+  }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+  const warnings = result.diagnostics.filter(d => d.severity === "warning");
+  assert.equal(warnings.length, 0, `Unexpected warnings: ${warnings.map(w => w.message).join(", ")}`);
+}
+
+function testMathBuiltinsRuntime() {
+  const source = `robot "MathRuntime" version "1.0"
+state {
+  result: number = 0
+}
+on tick {
+  set result = abs(-4) + min(2, 9) + max(1, 5) + clamp(12, 0, 10)
+  // result = 4 + 2 + 5 + 10 = 21
+  stop
+}`;
+  const prog = compile(source);
+  assert.ok(prog.success, `Compile failed: ${prog.errors.join(", ")}`);
+  const match = runMatch({
+    config: { mode: "1v1_ranked", arenaWidth: 80, arenaHeight: 80, maxTicks: 10, tickRate: 30, seed: 1 },
+    participants: [
+      { program: prog.program, constants: prog.constants, playerId: "p1", teamId: 0 },
+      { program: prog.program, constants: prog.constants, playerId: "p2", teamId: 1 },
+    ],
+  });
+  // We can't directly read state slots from replay, but the match should complete without VM error.
+  assert.ok(match.replay.frames.length > 0, "Match should produce frames");
+}
+
+function testTacticsHelpersCompile() {
+  const source = `robot "Tactics" version "1.0"
+on tick {
+  let e = weakest_visible_enemy()
+  let a = lowest_health_ally()
+  let c = squad_center()
+  let ne = count_enemies_near(position(), 10)
+  let na = count_allies_near(position(), 10)
+  let db = distance_between(position(), c)
+  let dt = direction_to(c)
+  let ab = angle_between(position(), c)
+  if ne + na > 0 and db >= 0 { stop }
+  if e != null and a != null { stop }
+  if dt.x + dt.y != 0 or ab == 0 { stop }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
+function testMakePositionBuiltin() {
+  const source = `robot "MakePos" version "1.0"
+on tick {
+  let p = make_position(20, 30)
+  if p.x == 20 and p.y == 30 {
+    move_to p
+  }
+}`;
+  const result = compile(source);
+  assert.ok(result.success, `Compile failed: ${result.errors.join(", ")}`);
+}
+
+function testUnusedStateWarning() {
+  const source = `robot "Unused" version "1.0"
+state {
+  dead_var: number = 0
+  live_var: number = 0
+}
+on tick {
+  set live_var = live_var + 1
+}`;
+  const analyzer = new SemanticAnalyzer();
+  const ast = parseSource(source);
+  const diagnostics = analyzer.analyze(ast);
+  const warnings = diagnostics.filter(d => d.severity === "warning");
+  const hasDeadVar = warnings.some(w => w.message.includes("dead_var") && w.message.includes("never read"));
+  assert.ok(hasDeadVar, `Expected warning about dead_var but got: ${warnings.map(w => w.message).join("; ")}`);
+  const hasLiveVar = warnings.some(w => w.message.includes("live_var"));
+  assert.ok(!hasLiveVar, "Should not warn about live_var (it is read)");
+}
+
+function testUnusedConstantWarning() {
+  const source = `robot "UnusedC" version "1.0"
+const {
+  UNUSED = 42
+  USED = 5
+}
+on tick {
+  let x = USED + 1
+  if x > 0 { stop }
+}`;
+  const analyzer = new SemanticAnalyzer();
+  const ast = parseSource(source);
+  const diagnostics = analyzer.analyze(ast);
+  const warnings = diagnostics.filter(d => d.severity === "warning");
+  const hasUnused = warnings.some(w => w.message.includes("UNUSED") && w.message.includes("never used"));
+  assert.ok(hasUnused, `Expected warning about UNUSED but got: ${warnings.map(w => w.message).join("; ")}`);
+  const hasUsed = warnings.some(w => w.message.includes("'USED'"));
+  assert.ok(!hasUsed, "Should not warn about USED constant");
+}
+
+function testIdentifierDidYouMean() {
+  const source = `robot "Typo" version "1.0"
+const {
+  ENGAGE_RANGE = 8
+}
+on tick {
+  if ENGAG_RANGE > 5 { stop }
+}`;
+  const result = compile(source);
+  assert.ok(!result.success, "Should fail to compile with unknown identifier");
+  const hasSuggestion = result.errors.some(e => e.includes("Did you mean") && e.includes("ENGAGE_RANGE"));
+  assert.ok(hasSuggestion, `Expected 'Did you mean ENGAGE_RANGE' suggestion, got: ${result.errors.join("; ")}`);
+}
+
+// --- New default preset bots all compile cleanly ---
+
+function testNewPresetsCompileWithoutWarnings() {
+  // Read app.js and extract the four new presets' sources to make sure they
+  // stay valid ArenaScript as the language evolves.
+  const src = fs.readFileSync(new URL("../app.js", import.meta.url), "utf8");
+  const presets = ["hivemind", "phantom", "warden", "overclock"];
+  for (const name of presets) {
+    const re = new RegExp(`\\b${name}:\\s*\\{[\\s\\S]*?source:\\s*\`([\\s\\S]*?)\`,?\\s*\\},`, "m");
+    const match = src.match(re);
+    assert.ok(match, `Could not extract preset source for '${name}'`);
+    const result = compile(match[1]);
+    assert.ok(result.success, `Preset '${name}' failed to compile: ${result.errors.join("; ")}`);
+    const warnings = result.diagnostics.filter(d => d.severity === "warning");
+    assert.equal(warnings.length, 0,
+      `Preset '${name}' has warnings: ${warnings.map(w => w.message).join("; ")}`);
+  }
+}
+
 // --- Run all tests ---
 
 function run() {
@@ -1215,6 +1370,15 @@ function run() {
     testMatchIdIsUniqueWhenTimeIsFrozen,
     testRejectsNonFiniteConstants,
     testRejectsNonFiniteStateInitializer,
+    // New built-ins & diagnostics
+    testMathBuiltinsCompile,
+    testMathBuiltinsRuntime,
+    testTacticsHelpersCompile,
+    testMakePositionBuiltin,
+    testUnusedStateWarning,
+    testUnusedConstantWarning,
+    testIdentifierDidYouMean,
+    testNewPresetsCompileWithoutWarnings,
   ];
 
   let passed = 0;

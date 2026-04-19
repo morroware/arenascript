@@ -188,6 +188,17 @@
   padding-top: 14px;
 }
 
+.sidebar-subheader {
+  padding: 10px 16px 4px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--accent-cyan, #6fdfff);
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
 .sidebar-mini-btn {
   background: transparent;
   color: var(--accent-cyan);

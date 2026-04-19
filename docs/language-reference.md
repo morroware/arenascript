@@ -398,6 +398,24 @@ Every combat action now feeds into a three-resource model: **health**, **heat**,
 - **Ammo** is finite per-spawn and only replenishes at resupply depots. Each weapon has a different ammo cost. Melee `attack` and `zap` cost no ammo.
 - **Resupply depots** are neutral map objects placed in the arena middle. Standing on one refills ammo and vents heat each tick — contested map objectives.
 
+## Diagnostics
+
+The compiler returns errors and warnings. Errors block compilation; warnings
+show in the editor but still let the bot run. Common diagnostics:
+
+| Kind | When it fires |
+|------|---------------|
+| `Unknown action 'frire_at'. Did you mean 'fire_at'?` | Typoed action name — the compiler finds the closest match |
+| `Unknown function 'nearst_enemy'. Did you mean 'nearest_enemy'?` | Typoed sensor or user function |
+| `Unknown identifier 'ENGAG_RANGE'. Did you mean 'ENGAGE_RANGE'?` | Typoed constant or state variable |
+| `State variable 'mode' is declared but never read` | Warning — you `set` a state var but never branch on it |
+| `Constant 'FOOBAR' is declared but never used` | Warning — a dead `const` entry |
+| `Cannot mutate constant 'X'. Constants are immutable` | Error — `const` values are compile-time inlined |
+| `Duplicate handler for event 'tick'` | Error — one handler per event per robot |
+
+"Did you mean?" suggestions use Levenshtein distance over every name in scope,
+including sensors, actions, user functions, constants, state, and local vars.
+
 ## Built-in Sensors
 
 Sensors query the game world. They consume budget (max 30 sensor calls per tick).
@@ -474,6 +492,48 @@ Sensors query the game world. They consume budget (max 30 sensor calls per tick)
 | `hive_get(key)` | value or `null` | Read a value from the shared team memory |
 | `hive_set(key, value)` | value | Write a value to the shared team memory (visible to all squad members) |
 | `hive_has(key)` | boolean | Whether the team has stored a value under `key` |
+
+### Math Built-ins
+
+Pure numeric helpers. All return `number`; non-finite inputs are coerced to `0`.
+
+| Call | Returns | Description |
+|------|---------|-------------|
+| `abs(x)` | number | Absolute value |
+| `min(a, b)` | number | Smaller of two values |
+| `max(a, b)` | number | Larger of two values |
+| `clamp(x, lo, hi)` | number | `x` constrained to `[lo, hi]` |
+| `floor(x)` | number | Round toward -∞ |
+| `ceil(x)` | number | Round toward +∞ |
+| `round(x)` | number | Round to nearest integer |
+| `sign(x)` | number | `-1`, `0`, or `1` |
+| `sqrt(x)` | number | Square root (negative inputs return `0`) |
+| `pow(a, b)` | number | `a` to the power of `b` |
+| `lerp(a, b, t)` | number | Linear blend, `t` auto-clamped to `[0,1]` |
+| `pi()` | number | `3.14159...` |
+| `tick_phase(period)` | number | `current_tick() % period` — handy for periodic behaviors |
+
+### Vector / Spatial Helpers
+
+| Call | Returns | Description |
+|------|---------|-------------|
+| `distance_between(a, b)` | number | Distance between two positions (accepts raw vecs or entity views) |
+| `direction_to(target)` | vector | Unit-length direction from this robot toward `target` |
+| `angle_between(a, b)` | number | Degrees from `a` to `b` (standard `atan2`, rounded) |
+| `make_position(x, y)` | position | Build a position object usable with `move_to`, `move_toward`, etc. Coordinates are clamped to the arena bounds. |
+
+### Tactics Helpers
+
+Squad/awareness utilities. These all obey fog-of-war — `count_enemies_near` only
+sees enemies the robot's class vision range and LOS would allow.
+
+| Call | Returns | Description |
+|------|---------|-------------|
+| `squad_center()` | position | Mean position of all alive allies (including self) |
+| `lowest_health_ally()` | ally? | Ally with the lowest HP on your team (excluding self) |
+| `weakest_visible_enemy()` | enemy? | Visible enemy with the lowest HP |
+| `count_enemies_near(center, range)` | number | How many enemies within `range` of `center` |
+| `count_allies_near(center, range)` | number | How many allies within `range` of `center` (excluding self) |
 
 ### Entity Properties
 

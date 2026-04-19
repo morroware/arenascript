@@ -202,6 +202,14 @@ on tick {
     return
   }
 
+  // Stay defensive while the retreating flag is set — keep distance even if
+  // we technically have the shot, so a recovering kiter doesn't re-engage
+  // before reaching a heal zone.
+  if retreating {
+    retreat
+    return
+  }
+
   if can_attack(enemy) {
     fire_at enemy.position
     if strafing_dir > 0 { strafe_right } else { strafe_left }
@@ -369,6 +377,13 @@ on tick {
       attack enemy
     }
     stop
+    return
+  }
+
+  // While recovering from a heal zone but still below safe HP, stay defensive
+  // instead of re-engaging on the next tick.
+  if healing and health() < SAFE_HEALTH {
+    find_safety()
     return
   }
   set healing = false
@@ -639,6 +654,479 @@ on signal_received(event) {
   if patrolling {
     move_toward event.senderPosition
   }
+}`,
+  },
+
+  hivemind: {
+    name: "Hivemind",
+    class: "brawler",
+    source: `robot "Hivemind" version "1.0"
+
+// Squad-aware brawler that uses hive memory to coordinate focus fire.
+// The robot with the lowest squad index calls the target; others confirm
+// and converge. Breaks off for healing only when dying alone.
+
+meta {
+  author: "ArenaLab"
+  class: "brawler"
+}
+
+const {
+  HEAL_THRESHOLD = 40
+  PANIC_HEALTH = 22
+}
+
+state {
+  role: string = "striker"
+  wander_ticks: number = 0
+}
+
+on spawn {
+  mark_position "home"
+  set role = "striker"
+  if my_index() == 0 {
+    set role = "caller"
+  }
+}
+
+fn call_focus_target() {
+  let e = weakest_visible_enemy()
+  if e != null {
+    hive_set("focus_id", e.id)
+    hive_set("focus_x", e.position.x)
+    hive_set("focus_y", e.position.y)
+    hive_set("focus_tick", current_tick())
+  }
+}
+
+fn resolve_focus() {
+  if not hive_has("focus_tick") { return null }
+  let set_tick = hive_get("focus_tick")
+  if current_tick() - set_tick > 60 { return null }
+  let fx = hive_get("focus_x")
+  let fy = hive_get("focus_y")
+  if fx == null or fy == null { return null }
+  return make_position(fx, fy)
+}
+
+on tick {
+  if is_in_hazard() { move_forward return }
+
+  // Panic: bail out to heal zone regardless of squad state.
+  if health() < PANIC_HEALTH {
+    let h = nearest_heal_zone()
+    if h != null { move_to h.position return }
+    retreat
+    return
+  }
+
+  // Caller keeps the shared focus fresh each tick it can see the enemy.
+  if role == "caller" {
+    call_focus_target()
+  }
+
+  let enemy = nearest_enemy()
+  if enemy != null {
+    // If I'm overheating and a target is close, vent heat instead of missing.
+    if heat_percent() > 80 and distance_to(enemy.position) > 4 {
+      vent_heat
+      return
+    }
+    if can_attack(enemy) {
+      attack enemy
+      return
+    }
+    move_toward enemy.position
+    return
+  }
+
+  // No enemy in sight — converge on the squad focus if fresh.
+  let focus = resolve_focus()
+  if focus != null {
+    if distance_to(focus) > 2 {
+      move_toward focus
+      return
+    }
+  }
+
+  // Rally on squad center so we stay a mutual-support blob.
+  let center = squad_center()
+  if distance_between(position(), center) > 12 {
+    move_toward center
+    return
+  }
+
+  // Mild patrol so we don't stall.
+  set wander_ticks = wander_ticks + 1
+  if wall_ahead(3) or wander_ticks > 25 {
+    set wander_ticks = 0
+    if tick_phase(2) == 0 { turn_left } else { turn_right }
+  }
+  move_forward
+}
+
+on damaged(event) {
+  if health() < HEAL_THRESHOLD {
+    send_signal "hurt"
+  }
+}
+
+on low_health {
+  hive_set("fallback_needed", 1)
+}
+
+on signal_received(event) {
+  // Push toward ally in distress if we're healthy.
+  if health() > HEAL_THRESHOLD {
+    move_toward event.senderPosition
+  }
+}`,
+  },
+
+  phantom: {
+    name: "Phantom",
+    class: "ranger",
+    source: `robot "Phantom" version "1.0"
+
+// Stealth assassin. Scouts cloaked, waits for a wounded target, strikes with
+// fire_heavy from oblique angles, then disengages before the cloak breaks.
+// Arms self-destruct as a last resort when pinned at low HP.
+
+meta {
+  author: "ArenaLab"
+  class: "ranger"
+}
+
+const {
+  STRIKE_HP = 45
+  CLOAK_TRIGGER_DIST = 14
+  DISENGAGE_HP = 35
+}
+
+state {
+  mode: string = "stalk"
+}
+
+on spawn {
+  mark_position "den"
+  set mode = "stalk"
+}
+
+fn choose_target() {
+  // Prefer a wounded enemy the whole squad knows about, else the nearest.
+  let weak = weakest_visible_enemy()
+  if weak != null and weak.health < STRIKE_HP {
+    return weak
+  }
+  return nearest_enemy()
+}
+
+on tick {
+  if is_in_hazard() { move_forward return }
+
+  let enemy = choose_target()
+
+  // Disengage mode: always move away from the nearest enemy and seek a depot
+  // before returning to hunt. Set by damage + low-health handlers.
+  if mode == "disengage" {
+    let depot = nearest_depot()
+    if depot != null and not is_on_depot() {
+      move_to depot.position
+      return
+    }
+    if is_on_depot() { vent_heat return }
+    if health() > 70 { set mode = "stalk" }
+    retreat
+    return
+  }
+
+  // No threat nearby → use cloak+movement to close distance toward last known.
+  if enemy == null {
+    let last = last_seen_enemy()
+    if last != null and last.age < 60 {
+      move_toward last.position
+      return
+    }
+    let cp = nearest_control_point()
+    if cp != null { move_to cp.position return }
+    if wall_ahead(3) { turn_right } else { move_forward }
+    return
+  }
+
+  let d = distance_to(enemy.position)
+
+  // Ambush setup: cloak while approaching a juicy target at medium range.
+  if not is_cloaked() and d > CLOAK_TRIGGER_DIST and d < 30 and enemy.health < STRIKE_HP {
+    cloak
+    move_toward enemy.position
+    return
+  }
+
+  // In strike window: heavy shot if ammo allows, else light fire.
+  if can_attack(enemy) {
+    if ammo() >= 4 and heat_percent() < 70 {
+      fire_heavy enemy.position
+    } else if ammo() >= 1 {
+      fire_light enemy.position
+    } else {
+      // Out of ammo — bleed heat and close for melee.
+      if d < 5 { attack enemy } else { move_toward enemy.position }
+    }
+    // Lateral break so we don't get line-checked.
+    if tick_phase(2) == 0 { strafe_left } else { strafe_right }
+    return
+  }
+
+  // Low HP + still visible: consider arming self-destruct.
+  if health() < DISENGAGE_HP and d < 8 and not self_destruct_armed() {
+    self_destruct
+    return
+  }
+
+  // Default: keep ranged pressure
+  fire_at enemy.position
+}
+
+on damaged(event) {
+  // Getting hit while cloaked means we're already revealed — break contact.
+  if health() < DISENGAGE_HP {
+    set mode = "disengage"
+  }
+}
+
+on low_health {
+  set mode = "disengage"
+}`,
+  },
+
+  warden: {
+    name: "Warden",
+    class: "support",
+    source: `robot "Warden" version "1.0"
+
+// Objective-anchored support. Holds the control point, mines chokepoints,
+// publishes danger callouts to the hive, and falls back to the depot when
+// heat or ammo drops too low to defend.
+
+meta {
+  author: "ArenaLab"
+  class: "support"
+}
+
+const {
+  DEPOT_AMMO_THRESHOLD = 20
+  VENT_THRESHOLD = 70
+  LOW_HP = 45
+  DEFEND_RADIUS = 6
+  MINE_INTERVAL = 80
+}
+
+state {
+  next_mine_tick: number = 40
+}
+
+on spawn {
+  mark_position "post"
+  place_mine
+}
+
+fn dangerous_here() {
+  // "Danger" = at least one enemy within 10 units, or hive already flagged it.
+  if count_enemies_near(position(), 10) > 0 { return true }
+  if hive_get("enemy_rush") == 1 and current_tick() - hive_get("enemy_rush_tick") < 60 {
+    return true
+  }
+  return false
+}
+
+fn defend_point() {
+  let cp = nearest_control_point()
+  if cp != null { return cp.position }
+  return recall_position("post")
+}
+
+on tick {
+  if is_in_hazard() { move_forward return }
+
+  // Resource management first — a Warden without ammo is useless.
+  if (ammo() < DEPOT_AMMO_THRESHOLD or heat_percent() > VENT_THRESHOLD) and not dangerous_here() {
+    let depot = nearest_depot()
+    if depot != null and distance_to(depot.position) > 1 {
+      move_to depot.position
+      return
+    }
+    if is_on_depot() {
+      vent_heat
+      return
+    }
+  }
+
+  let post = defend_point()
+
+  let enemy = nearest_enemy()
+  if enemy != null {
+    // Broadcast enemy rush so aggressive allies rotate in.
+    if count_enemies_near(position(), 14) >= 2 {
+      hive_set("enemy_rush", 1)
+      hive_set("enemy_rush_tick", current_tick())
+    }
+
+    if health() < LOW_HP {
+      shield
+      let heal = nearest_heal_zone()
+      if heal != null { move_to heal.position return }
+    }
+
+    if can_attack(enemy) {
+      fire_at enemy.position
+      return
+    }
+
+    // Don't chase off the point — kite around it.
+    if post != null and distance_to(post) > DEFEND_RADIUS {
+      move_to post
+      return
+    }
+
+    move_toward enemy.position
+    return
+  }
+
+  // Idle maintenance: seed the approach with mines at a fixed cadence.
+  if current_tick() >= next_mine_tick {
+    place_mine
+    set next_mine_tick = current_tick() + MINE_INTERVAL
+  }
+
+  if post != null and distance_to(post) > 1 {
+    move_to post
+    return
+  }
+
+  overwatch
+  stop
+}
+
+on damaged(event) {
+  if health() < LOW_HP {
+    shield
+    send_signal "warden_down"
+  }
+}`,
+  },
+
+  overclock: {
+    name: "Overclock",
+    class: "tank",
+    source: `robot "Overclock" version "1.0"
+
+// Adaptive tank that cycles between defensive and offensive modes based on
+// outnumbering ratio and heat budget. Uses grenade + zap combos when flanked,
+// shield+taunt when isolated.
+
+meta {
+  author: "ArenaLab"
+  class: "tank"
+}
+
+const {
+  AGGRO_RATIO = 1
+  SHIELD_HP = 85
+  PANIC_HP = 40
+  GRENADE_MIN_TARGETS = 2
+}
+
+state {
+  mode: string = "hold"
+}
+
+on spawn {
+  mark_position "anchor"
+  set mode = "hold"
+}
+
+fn pick_mode() {
+  let enemies = count_enemies_near(position(), 16)
+  let allies = count_allies_near(position(), 16) + 1
+  if enemies == 0 { return "hold" }
+  if enemies >= allies + AGGRO_RATIO { return "defend" }
+  return "press"
+}
+
+on tick {
+  if is_in_hazard() { move_forward return }
+
+  set mode = pick_mode()
+
+  let enemy = nearest_enemy()
+
+  // Overheat relief — trade a tick instead of misfiring.
+  if heat_percent() > 88 {
+    vent_heat
+    return
+  }
+
+  if enemy == null {
+    let anchor = recall_position("anchor")
+    if anchor != null and distance_to(anchor) > 6 {
+      move_to anchor
+      return
+    }
+    overwatch
+    stop
+    return
+  }
+
+  let d = distance_to(enemy.position)
+
+  // Panic: shield+retreat toward heal zone.
+  if health() < PANIC_HP {
+    shield
+    let heal = nearest_heal_zone()
+    if heal != null { move_to heal.position return }
+    retreat
+    return
+  }
+
+  // Grenade cluster: when 2+ enemies bunched close, explode them.
+  if count_enemies_near(enemy.position, 4) >= GRENADE_MIN_TARGETS and d < 14 {
+    if ammo() >= 8 and heat_percent() < 60 {
+      grenade enemy.position
+      return
+    }
+  }
+
+  // Point-blank zap beats melee DPS per tick.
+  if d < 4 and energy() > 25 and heat_percent() < 70 {
+    zap
+    return
+  }
+
+  if mode == "defend" {
+    // Pre-shield on incoming shots, hold ground, taunt to absorb aggro.
+    if health() < SHIELD_HP { shield }
+    taunt
+    if can_attack(enemy) { attack enemy return }
+    move_toward enemy.position
+    return
+  }
+
+  // press / hold
+  if can_attack(enemy) {
+    attack enemy
+    return
+  }
+  move_toward enemy.position
+}
+
+on damaged(event) {
+  if health() < SHIELD_HP {
+    shield
+  }
+}
+
+on low_health {
+  send_signal "anchor_down"
 }`,
   },
 };
@@ -1680,7 +2168,7 @@ function drawArenaBackground() {
   ctx.restore();
 }
 
-function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, isAlive, action, robotClass) {
+function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, isAlive, action, robotClass, extras = {}) {
   const s = canvasScale();
   const cx = x * s;
   const cy = y * s;
@@ -1699,6 +2187,37 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
     ctx.textAlign = "center";
     ctx.fillText("X", cx, cy + 3);
     return;
+  }
+
+  // Normalize extras used by several indicators below.
+  const heat = Math.max(0, Math.min(100, extras.heat ?? 0));
+  const ammo = extras.ammo ?? null;
+  const maxAmmo = extras.maxAmmo ?? 0;
+  const overheated = !!extras.overheated;
+  const cloaked = !!extras.cloaked;
+  const selfDestructing = !!extras.selfDestructing;
+  const heading = extras.heading;
+
+  // Cloak styling — soft pulse + translucency cue teammates can still see.
+  let bodyAlpha = 1;
+  if (cloaked) {
+    const t = (extras.frameTick ?? 0) * 0.2;
+    bodyAlpha = 0.28 + 0.12 * Math.sin(t);
+  }
+
+  // Self-destruct: dramatic red pulse ring that grows over the countdown.
+  if (selfDestructing) {
+    const pulse = 1 + 0.25 * Math.sin((extras.frameTick ?? 0) * 0.4);
+    ctx.beginPath();
+    ctx.arc(cx, cy, (radius + 10) * pulse, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,60,60,0.85)";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, (radius + 14) * pulse, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,120,60,0.25)";
+    ctx.lineWidth = 4;
+    ctx.stroke();
   }
 
   // Shield indicator (glowing ring)
@@ -1722,6 +2241,15 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
     ctx.setLineDash([]);
   }
 
+  // Overheated: orange flame halo so players notice resource pressure.
+  if (overheated) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,140,40,0.9)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   // Outer glow (larger, more dramatic)
   const glowGrad = ctx.createRadialGradient(cx, cy, radius, cx, cy, radius + 8);
   glowGrad.addColorStop(0, glow);
@@ -1731,7 +2259,26 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
   ctx.fillStyle = glowGrad;
   ctx.fill();
 
+  // Heat arc — fraction of a ring in top-right that fills as heat rises.
+  // Rendered before the body so it reads as a shoulder-of-the-chassis gauge.
+  if (heat > 0) {
+    const ringR = radius + 2.5;
+    const heatFrac = heat / 100;
+    const heatColor = overheated ? "rgba(255,60,30,0.95)"
+      : heat > 80 ? "rgba(255,120,30,0.9)"
+      : heat > 50 ? "rgba(255,200,60,0.8)"
+      : "rgba(255,230,120,0.5)";
+    ctx.beginPath();
+    // Start at -90deg (top), sweep clockwise.
+    ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * heatFrac);
+    ctx.strokeStyle = heatColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   // Body with gradient
+  ctx.save();
+  ctx.globalAlpha = bodyAlpha;
   const bodyGrad = ctx.createRadialGradient(cx - radius * 0.3, cy - radius * 0.3, 0, cx, cy, radius);
   bodyGrad.addColorStop(0, color);
   bodyGrad.addColorStop(1, teamId === 0 ? "#006688" : "#881122");
@@ -1743,6 +2290,26 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
+  // Heading arrow — small triangle at the front so it's obvious which way
+  // the robot is facing. Only meaningful when heading is non-zero.
+  if (heading && (heading.x !== 0 || heading.y !== 0)) {
+    const hx = heading.x;
+    const hy = heading.y;
+    const tipLen = radius + 3;
+    const baseLen = radius + 0.2;
+    const halfWidth = radius * 0.55;
+    // Perpendicular for triangle base.
+    const px = -hy;
+    const py = hx;
+    ctx.beginPath();
+    ctx.moveTo(cx + hx * tipLen, cy + hy * tipLen);
+    ctx.lineTo(cx + hx * baseLen + px * halfWidth, cy + hy * baseLen + py * halfWidth);
+    ctx.lineTo(cx + hx * baseLen - px * halfWidth, cy + hy * baseLen - py * halfWidth);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
   // Class letter inside robot body
   const classLetter = { brawler: "B", ranger: "R", tank: "T", support: "S" };
   ctx.fillStyle = "#000";
@@ -1751,6 +2318,7 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
   ctx.textBaseline = "middle";
   ctx.fillText(classLetter[robotClass] || "", cx, cy);
   ctx.textBaseline = "alphabetic";
+  ctx.restore();
 
   // Health bar
   const barW = radius * 2.8;
@@ -1776,6 +2344,18 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
   ctx.fillStyle = "#4488ff";
   ctx.fillRect(barX, eBarY, barW * eRatio, eBarH);
 
+  // Ammo pip strip below energy — shows roughly how many shots remain.
+  if (maxAmmo > 0 && ammo !== null) {
+    const aBarY = eBarY + eBarH + 2;
+    const aBarH = 2;
+    const aRatio = Math.max(0, ammo / maxAmmo);
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(barX - 0.5, aBarY - 0.5, barW + 1, aBarH + 1);
+    // Shift to red when ammo is critical to cue players to resupply.
+    ctx.fillStyle = aRatio > 0.5 ? "#b5b59c" : aRatio > 0.2 ? "#d0a040" : "#e86050";
+    ctx.fillRect(barX, aBarY, barW * aRatio, aBarH);
+  }
+
   // HP text
   ctx.fillStyle = "#ffffff";
   ctx.font = `bold ${Math.max(8, 2 * s)}px sans-serif`;
@@ -1789,11 +2369,26 @@ function drawRobot(x, y, health, maxHealth, energy, maxEnergy, teamId, label, is
   ctx.fillText(label, cx, cy + radius + 14);
 }
 
-function drawProjectile(x, y) {
+function drawProjectile(x, y, prev) {
   const s = canvasScale();
   const cx = x * s;
   const cy = y * s;
   const radius = 1.5 * s;
+
+  // Motion trail: short streak from previous position if available.
+  if (prev && (prev.x !== x || prev.y !== y)) {
+    const px = prev.x * s;
+    const py = prev.y * s;
+    const grad = ctx.createLinearGradient(px, py, cx, cy);
+    grad.addColorStop(0, "rgba(255,221,0,0)");
+    grad.addColorStop(1, "rgba(255,221,0,0.8)");
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(cx, cy);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
 
   // Outer glow
   const projGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius + 6);
@@ -1815,7 +2410,7 @@ function drawProjectile(x, y) {
   ctx.stroke();
 }
 
-function drawFrame(frame, labels) {
+function drawFrame(frame, labels, prevFrame) {
   if (!frame || !frame.robots) {
     drawArenaBackground();
     return;
@@ -1827,6 +2422,12 @@ function drawFrame(frame, labels) {
       x: c.x, y: c.y, w: c.w, h: c.h, destructible: c.destructible,
     }));
   }
+
+  // Index the previous frame's projectile positions by id so we can render a
+  // motion trail for each live projectile without doing an O(n²) search.
+  const prevProjMap = prevFrame && prevFrame.projectiles
+    ? new Map(prevFrame.projectiles.map(p => [p.id, p.position]))
+    : null;
 
   drawArenaBackground();
 
@@ -1885,7 +2486,8 @@ function drawFrame(frame, labels) {
   // Draw projectiles first (behind robots)
   if (frame.projectiles) {
     for (const p of frame.projectiles) {
-      drawProjectile(p.position.x, p.position.y);
+      const prev = prevProjMap ? prevProjMap.get(p.id) : null;
+      drawProjectile(p.position.x, p.position.y, prev);
     }
   }
 
@@ -1894,8 +2496,22 @@ function drawFrame(frame, labels) {
     const classStats = CLASS_STATS[r.robotClass];
     const maxHP = classStats?.health || 100;
     const maxEnergy = classStats?.energy || 100;
+    const maxAmmo = classStats?.maxAmmo || 0;
     const isAlive = r.health > 0;
-    drawRobot(r.position.x, r.position.y, r.health, maxHP, r.energy, maxEnergy, r.teamId, labels[r.id] || r.id, isAlive, r.action, r.robotClass);
+    drawRobot(
+      r.position.x, r.position.y, r.health, maxHP, r.energy, maxEnergy,
+      r.teamId, labels[r.id] || r.id, isAlive, r.action, r.robotClass,
+      {
+        heat: r.heat,
+        ammo: r.ammo,
+        maxAmmo,
+        overheated: r.overheated,
+        cloaked: r.cloaked,
+        selfDestructing: r.selfDestructing,
+        heading: r.heading,
+        frameTick: frame.tick,
+      },
+    );
   }
 
   // Draw event indicators (damage flashes, grenade explosions, etc.)
@@ -2079,7 +2695,7 @@ function exitMatchLive() {
 
   // Redraw
   if (replayData && replayData[replayFrameIndex]) {
-    drawFrame(replayData[replayFrameIndex], replayLabels);
+    drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
   }
 }
 
@@ -2649,7 +3265,7 @@ function toggleFullPageBattle() {
 
     // Redraw current frame
     if (replayData && replayData[replayFrameIndex]) {
-      drawFrame(replayData[replayFrameIndex], replayLabels);
+      drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
     }
   });
 }
@@ -2660,7 +3276,7 @@ function toggleDecisionTraces() {
 
   // Redraw current frame
   if (replayData && replayData[replayFrameIndex]) {
-    drawFrame(replayData[replayFrameIndex], replayLabels);
+    drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
   }
 }
 
@@ -2793,7 +3409,7 @@ function setView(name) {
     canvasEl.width = 400;
     canvasEl.height = 400;
     if (replayData && replayData[replayFrameIndex]) {
-      drawFrame(replayData[replayFrameIndex], replayLabels);
+      drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
     } else {
       drawIdle();
     }
@@ -2810,7 +3426,7 @@ function resizeArenaCanvasForCurrentView() {
   canvasEl.width = w;
   canvasEl.height = h;
   if (replayData && replayData[replayFrameIndex]) {
-    drawFrame(replayData[replayFrameIndex], replayLabels);
+    drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
   } else {
     drawIdle();
   }
@@ -2828,7 +3444,7 @@ window.addEventListener("resize", () => {
       canvasEl.height = Math.max(400, wrap.clientHeight - 32);
     }
     if (replayData && replayData[replayFrameIndex]) {
-      drawFrame(replayData[replayFrameIndex], replayLabels);
+      drawFrame(replayData[replayFrameIndex], replayLabels, replayFrameIndex > 0 ? replayData[replayFrameIndex - 1] : null);
     }
   } else if (currentView === "arena") {
     resizeArenaCanvasForCurrentView();
