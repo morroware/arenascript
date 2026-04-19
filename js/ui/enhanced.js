@@ -564,7 +564,14 @@ export function installEditorAutocomplete(editorEl, onAccept) {
     if (prefix.includes("//")) return null;
     const quoteCount = (prefix.match(/"/g) ?? []).length;
     if (quoteCount % 2 === 1) return null;
-    return { start, end: pos, word };
+    // Extend `end` forward through any identifier characters that follow the
+    // caret. Without this, accepting a completion with the cursor in the
+    // middle of a word (e.g. typing `nea|rest` then picking `nearest_enemy`)
+    // would leave the trailing `rest` behind and produce `nearest_enemyrest`.
+    // The replacement range now covers the whole token under/around the caret.
+    let end = pos;
+    while (end < src.length && /[A-Za-z0-9_]/.test(src[end])) end++;
+    return { start, end, word };
   }
 
   function computeCaretPosition() {
