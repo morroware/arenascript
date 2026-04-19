@@ -2293,33 +2293,84 @@ async function doShareMatch() {
 }
 
 /** Inspect location.hash for #match=... on load and offer to restore it. */
+/**
+ * Inspect location.hash for a share token and, if present, rehydrate the
+ * editor + sidebar selectors so pressing Compile & Run reproduces the
+ * encoded match. Returns true when a share was applied (so bootstrap code
+ * knows not to clobber the editor with the default preset).
+ *
+ * Fields hydrated from the bundle:
+ *   - participants[0].{source|preset}  -> editor value
+ *   - seed                              -> #seed-input
+ *   - mode                              -> #match-mode (duel_1v1 | squad_2v2)
+ *   - arenaId                           -> #arena-select
+ *   - first non-team-0 participant.preset -> #opponent-select
+ *
+ * For squad_2v2 we best-effort pick the second team-1 participant's preset
+ * as the opponent; the default ally/enemy pair that doRunMatch injects is
+ * implicit in the mode and reconstructs automatically.
+ */
 function tryRestoreSharedMatch() {
   const hash = location.hash;
-  if (!hash || !hash.startsWith(`#${SHARE_HASH_KEY}=`)) return;
+  if (!hash || !hash.startsWith(`#${SHARE_HASH_KEY}=`)) return false;
   const token = hash.slice(SHARE_HASH_KEY.length + 2);
   const bundle = decodeShareBundle(token);
   if (!bundle) {
     toast("The shared match link is malformed or from an older format.", "error");
-    return;
+    return false;
   }
   // Clear the hash so reloading after edits doesn't keep re-applying the share.
   try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
-  // Load the first participant into the editor so the user has an obvious
-  // starting point, then stash the bundle for re-run.
+
+  // 1) Editor gets participant 0's source (user-authored code).
   const first = bundle.participants[0];
+  let editorPopulated = false;
   if (first) {
     const src = resolveBundleParticipantSource(first);
     if (src) {
       editorEl.value = src;
       onEditorInput();
+      editorPopulated = true;
     }
   }
+
+  // 2) Seed.
   if (typeof bundle.seed === "number" && seedInput) {
     seedInput.value = String(bundle.seed);
   }
-  lastMatchBundle = bundle; // so Share re-emits the same link
+
+  // 3) Match mode + arena selectors so the next Run Match round-trips.
+  //    Applied via a deferred assignment because the selects may populate
+  //    their <option> lists later in bootstrap (initArenaSelect, etc.).
+  const applySelectors = () => {
+    if (bundle.mode && matchModeSelect
+        && [...matchModeSelect.options].some(o => o.value === bundle.mode)) {
+      matchModeSelect.value = bundle.mode;
+    }
+    if (bundle.arenaId && arenaSelect
+        && [...arenaSelect.options].some(o => o.value === bundle.arenaId)) {
+      arenaSelect.value = bundle.arenaId;
+      // Fire the change handler if it's wired, so the info panel refreshes.
+      arenaSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    // Opponent: find the first participant on team 1 that has a preset key
+    // matching the opponent dropdown. Participant 0 is the editor author.
+    const oppParticipant = bundle.participants.find(p => p.teamId === 1 && p.preset);
+    if (oppParticipant && opponentSelect
+        && [...opponentSelect.options].some(o => o.value === oppParticipant.preset)) {
+      opponentSelect.value = oppParticipant.preset;
+    }
+  };
+  // Run once now and once after the current microtask so we catch late
+  // option population without depending on a specific init order.
+  applySelectors();
+  setTimeout(applySelectors, 0);
+
+  lastMatchBundle = bundle;
   if (btnShareMatch) btnShareMatch.disabled = false;
-  toast(`Shared match loaded (seed ${bundle.seed}). Hit Compile & Run to replay.`, "success");
+  const modeLabel = bundle.mode ? ` · ${bundle.mode}` : "";
+  toast(`Shared match loaded (seed ${bundle.seed}${modeLabel}). Hit Compile & Run to replay.`, "success");
+  return editorPopulated;
 }
 
 function resolveBundleParticipantSource(p) {
@@ -5398,8 +5449,10 @@ installOnboarding({
 
 // If the page was opened with a #match=asv1:... hash, try to rehydrate the
 // shared match so the opener can reproduce it with one click. Runs after
-// other UI is wired so toast() and editor state are ready.
-tryRestoreSharedMatch();
+// other UI is wired so toast() and editor state are ready. The boolean
+// return is consulted later in bootstrap so the default preset load
+// doesn't clobber the restored editor source.
+const sharedMatchRestored = tryRestoreSharedMatch();
 
 installCommandPalette(() => {
   // Build the command list dynamically so newly saved user bots, current
@@ -5521,7 +5574,10 @@ renderSidebarUserBots();
 refreshMatchHistoryPanel();
 updateAuthModeUi();
 refreshCurrentUser().catch(() => {});
-loadPreset("bruiser");
+// Skip the default preset when a shared match link populated the editor —
+// otherwise the restore toast fires but the source is overwritten a few
+// ticks later, defeating the share link entirely.
+if (!sharedMatchRestored) loadPreset("bruiser");
 initArenaSelect();
 drawIdle();
 updateEditorFileName();
